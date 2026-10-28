@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 300" role="img" aria-label="UNO-style card back">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#242b3a"/><stop offset="1" stop-color="#0d111b"/></linearGradient>
+    <linearGradient id="red" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ff4252"/><stop offset="1" stop-color="#c90e2b"/></linearGradient>
+    <pattern id="lines" width="16" height="16" patternUnits="userSpaceOnUse" patternTransform="rotate(35)"><path d="M0 0V16" stroke="#ffffff" stroke-opacity=".06" stroke-width="4"/></pattern>
+  </defs>
+  <rect x="2" y="2" width="196" height="296" rx="20" fill="#fff"/>
+  <rect x="9" y="9" width="182" height="282" rx="15" fill="url(#bg)"/>
+  <rect x="9" y="9" width="182" height="282" rx="15" fill="url(#lines)"/>
+  <path d="M100 31 C154 35 173 65 171 142 C169 211 144 263 100 269 C56 263 31 211 29 142 C27 65 46 35 100 31Z" fill="none" stroke="#ffffff" stroke-opacity=".78" stroke-width="4" transform="rotate(-14 100 150)"/>
+  <g transform="rotate(-15 100 150)"><ellipse cx="100" cy="150" rx="74" ry="47" fill="url(#red)" stroke="#fff" stroke-width="5"/><text x="100" y="168" fill="#fff" stroke="#222632" stroke-width="1.8" paint-order="stroke" font-family="Arial Black,Arial,sans-serif" font-size="51" font-weight="900" font-style="italic" text-anchor="middle">UNO</text></g>
+  <circle cx="34" cy="27" r="4" fill="#ffdf3d"/><circle cx="166" cy="273" r="4" fill="#28b86a"/>
+</svg>

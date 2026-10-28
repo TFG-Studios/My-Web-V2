@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#cf102d">
+  <meta name="description" content="A colourful, real-time multiplayer card game. Create a private room and play with friends.">
+  <title>UNO — Play with friends</title>
+  <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/socket.io/socket.io.js" defer></script>
+  <script src="/client.js" defer></script>
+</head>
+<body>
+  <div class="ambient ambient-one" aria-hidden="true"></div>
+  <div class="ambient ambient-two" aria-hidden="true"></div>
+
+  <main id="splashScreen" class="screen splash-screen" aria-label="Start screen">
+    <div class="splash-card-stack" aria-hidden="true">
+      <span class="splash-card splash-card-red">7</span>
+      <span class="splash-card splash-card-blue">↻</span>
+      <span class="splash-card splash-card-yellow">2</span>
+      <span class="splash-card splash-card-green">+2</span>
+    </div>
+    <div class="uno-brand splash-brand" aria-label="UNO">
+      <span>UNO</span><i aria-hidden="true">®</i>
+    </div>
+    <p class="splash-kicker">THE TABLE IS YOURS</p>
+    <button id="pressStart" class="press-start" type="button">
+      <span class="pulse-dot" aria-hidden="true"></span>
+      <span>PRESS ANYWHERE TO START</span>
+    </button>
+    <p class="splash-footer">A FRIENDLY GAME CAN TURN VERY COMPETITIVE.</p>
+  </main>
+
+  <main id="mainMenu" class="screen main-menu is-hidden" aria-label="Main menu">
+    <header class="menu-topbar">
+      <div class="small-brand"><span class="brand-mark-mini">U</span><span>UNO <small>ONLINE TABLE</small></span></div>
+      <div class="topbar-right">
+        <span class="online-pill"><i></i> PRIVATE MULTIPLAYER</span>
+        <button id="openSettings" class="icon-button" type="button" aria-label="Settings" title="Settings">⚙</button>
+      </div>
+    </header>
+    <section class="menu-hero">
+      <div class="menu-copy">
+        <p class="eyebrow"><span class="eyebrow-line"></span> SAME DECK. NEW RIVALRIES.</p>
+        <h1>ONE MORE<br><span>ROUND.</span></h1>
+        <p class="hero-description">Gather your favourite people, shuffle up and make every card count.</p>
+        <div class="menu-actions">
+          <button id="createRoomOpen" class="btn btn-primary btn-large" type="button"><span class="button-symbol">＋</span><span>Create room<small>Start your own table</small></span><b>→</b></button>
+          <button id="joinRoomOpen" class="btn btn-light btn-large" type="button"><span class="button-symbol">↗</span><span>Join room<small>Enter a friend's code</small></span><b>→</b></button>
+        </div>
+        <button id="howToPlayOpen" class="text-button" type="button">How to play <span>↗</span></button>
+      </div>
+      <div class="menu-art" aria-hidden="true">
+        <div class="art-orbit orbit-one"></div><div class="art-orbit orbit-two"></div>
+        <div class="art-card art-card-back"><span>UNO</span></div>
+        <div class="art-card art-card-blue"><strong>↻</strong><small>REVERSE</small></div>
+        <div class="art-card art-card-yellow"><strong>7</strong><small>YOUR MOVE</small></div>
+        <div class="art-card art-card-red"><strong>2</strong><small>MAKE IT COUNT</small></div>
+        <div class="art-burst">LET'S<br>PLAY!</div>
+      </div>
+    </section>
+    <footer class="menu-footer"><span>MADE FOR FRIENDS, BUILT FOR REMATCHES</span><span>2–5 PLAYERS <i>•</i> PRIVATE ROOMS</span></footer>
+  </main>
+
+  <main id="lobbyScreen" class="screen lobby-screen is-hidden" aria-label="Room lobby">
+    <header class="menu-topbar lobby-topbar">
+      <button id="backToMenu" class="back-link" type="button">← <span>Menu</span></button>
+      <div class="small-brand"><span class="brand-mark-mini">U</span><span>UNO <small>PRIVATE TABLE</small></span></div>
+      <button id="lobbySettings" class="icon-button" type="button" aria-label="Settings" title="Settings">⚙</button>
+    </header>
+    <section class="lobby-layout">
+      <div class="lobby-heading">
+        <p class="eyebrow"><span class="eyebrow-line"></span> THE TABLE IS ALMOST READY</p>
+        <h1>Call your<br><span>crew.</span></h1>
+        <p>Share the code, set the house rules, then deal the first hand.</p>
+        <div class="room-code-panel">
+          <div><small>ROOM CODE</small><strong id="roomCodeDisplay">------</strong></div>
+          <button id="copyRoomCode" class="btn btn-copy" type="button">Copy code <span>▣</span></button>
+        </div>
+        <div class="lobby-tip"><span>✦</span><p><b>Host tip</b> — you can change the house rules until the game begins.</p></div>
+      </div>
+      <div class="lobby-card">
+        <div class="lobby-card-head"><div><p class="eyebrow">YOUR TABLE</p><h2>Players <span id="playerCount">1/5</span></h2></div><span id="hostBadge" class="host-badge">YOU'RE HOST</span></div>
+        <div id="lobbyPlayers" class="lobby-players"></div>
+        <div class="lobby-rules-head"><div><h3>House rules</h3><p>Make this round your own.</p></div><span id="rulesLockLabel">HOST ONLY</span></div>
+        <div class="rules-grid">
+          <label class="rule-card"><span class="rule-icon rule-icon-red">＋</span><span class="rule-copy"><b>Stacking</b><small>Chain draw penalties and extra counters.</small></span><input id="ruleStacking" type="checkbox"><i class="toggle"></i></label>
+          <label class="rule-card"><span class="rule-icon rule-icon-blue">7·0</span><span class="rule-copy"><b>7–0 Swap</b><small>7 swaps hands; 0 rotates everyone.</small></span><input id="ruleZeroSeven" type="checkbox"><i class="toggle"></i></label>
+          <label class="rule-card"><span class="rule-icon rule-icon-green">↻</span><span class="rule-copy"><b>Draw to Play</b><small>Keep drawing until a card can be played.</small></span><input id="ruleDrawUntil" type="checkbox"><i class="toggle"></i></label>
+          <label class="rule-card"><span class="rule-icon rule-icon-yellow">6!</span><span class="rule-copy"><b>6 Reaction</b><small>Tap fast when someone drops a 6.</small></span><input id="ruleSixReaction" type="checkbox"><i class="toggle"></i></label>
+        </div>
+        <button id="startGame" class="btn btn-primary btn-start" type="button" disabled><span>Deal the cards</span><b>→</b></button>
+        <p id="lobbyHint" class="lobby-hint" role="status">Waiting for one more player…</p>
+      </div>
+    </section>
+  </main>
+
+  <main id="gameScreen" class="screen game-screen is-hidden" aria-label="UNO game table">
+    <header class="game-topbar">
+      <button id="leaveGame" class="game-exit" type="button" aria-label="Leave game">← <span>Leave table</span></button>
+      <div class="game-room-meta"><span class="live-dot"></span><span>ROOM <b id="gameRoomCode">------</b></span></div>
+      <div class="game-top-actions"><button id="gameSettings" class="icon-button icon-button-dark" type="button" aria-label="Settings">⚙</button></div>
+    </header>
+    <section class="table-stage">
+      <div class="table-halo" aria-hidden="true"></div>
+      <div class="table-felt">
+        <div class="table-inner-ring" aria-hidden="true"></div>
+        <div class="table-stitch" aria-hidden="true"></div>
+        <div class="table-logo" aria-hidden="true"><span>UNO</span><small>LET'S PLAY</small></div>
+        <div id="opponents" class="opponents" aria-label="Opponents"></div>
+        <div class="center-table">
+          <div class="turn-readout"><span class="turn-indicator" aria-hidden="true"></span><span id="turnLabel">Waiting for game…</span><span id="directionIndicator" class="direction-indicator" aria-label="Play direction">↻</span></div>
+          <div class="piles-row">
+            <div class="pile-wrap draw-wrap">
+              <span class="pile-caption">DRAW PILE</span>
+              <button id="drawPile" class="pile-button" type="button" aria-label="Draw a card"><img src="/assets/card-back.svg" alt=""><span class="deck-stack deck-stack-one"></span><span class="deck-stack deck-stack-two"></span></button>
+              <small id="deckCount">108 cards</small>
+            </div>
+            <div class="play-arrow" aria-hidden="true">➜</div>
+            <div class="pile-wrap discard-wrap">
+              <span class="pile-caption">PLAY PILE</span>
+              <div id="discardPile" class="discard-pile"><div class="card-placeholder">UNO</div></div>
+              <span id="currentColorBadge" class="current-color-badge"><i></i><span>RED</span></span>
+            </div>
+          </div>
+          <div id="tableMessage" class="table-message" role="status" aria-live="polite"></div>
+        </div>
+        <div id="penaltyBanner" class="penalty-banner is-hidden"><span class="penalty-mark">＋</span><span id="penaltyText">DRAW 2</span><button id="takePenalty" type="button">Take cards</button></div>
+        <div id="unoCatchBanner" class="uno-catch-banner is-hidden"><div><b>UNO MISSED!</b><small id="unoCatchText">Catch the player before the next move.</small></div><button id="catchUnoButton" type="button">CATCH!</button></div>
+        <div id="wildFourBanner" class="wild-four-banner is-hidden"><div><b>WILD DRAW FOUR</b><small>Accept the penalty or challenge the play.</small></div><button id="challengeWildFour" class="challenge-button" type="button">Challenge</button><button id="acceptWildFour" type="button">Draw 4</button></div>
+        <div id="swapBanner" class="swap-banner is-hidden"><b>7 — SWAP HANDS</b><span>Choose an opponent to exchange hands.</span></div>
+        <div id="reactionOverlay" class="reaction-overlay is-hidden"><div class="reaction-card"><p>QUICK!</p><h2>6 REACTION</h2><p>Tap to stay safe.</p><div id="reactionCountdown" class="reaction-countdown">4</div><button id="pressSix" type="button">I'M SAFE!</button><small id="reactionStatus">Waiting for reactions…</small></div></div>
+      </div>
+    </section>
+    <section class="player-zone">
+      <div class="player-hud"><div class="you-badge"><span id="myAvatar" class="avatar avatar-you">Y</span><div><b id="myNameLabel">YOU</b><small id="myHandCount">7 CARDS</small></div><span id="myTurnChip" class="turn-chip is-hidden">YOUR TURN</span></div><div class="hand-actions"><button id="passTurn" class="btn btn-pass is-hidden" type="button">Pass turn</button><button id="unoButton" class="uno-button" type="button" disabled><span>UNO!</span><small>CALL IT</small></button></div></div>
+      <div id="myHand" class="my-hand" aria-label="Your cards"></div>
+      <div class="hand-footnote"><span id="handHint">Your hand · Select a highlighted card to play</span><span id="handSortLabel">PLAYABLE CARDS GLOW</span></div>
+    </section>
+  </main>
+
+  <div id="roomSetupModal" class="modal-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="setupTitle">
+    <section class="modal-card setup-modal">
+      <button class="modal-close" data-close-modal="roomSetupModal" type="button" aria-label="Close">×</button>
+      <div class="modal-logo-mini">UNO</div>
+      <p class="eyebrow" id="setupEyebrow">MAKE IT A PRIVATE TABLE</p>
+      <h2 id="setupTitle">Create a room</h2>
+      <p id="setupDescription" class="modal-description">Pick your nickname and we'll set up a table for your crew.</p>
+      <label class="field-label" for="playerNameInput">YOUR NICKNAME</label>
+      <input id="playerNameInput" class="text-input" maxlength="16" autocomplete="nickname" placeholder="e.g. Card Shark">
+      <div id="joinCodeField" class="is-hidden"><label class="field-label" for="roomCodeInput">ROOM CODE</label><input id="roomCodeInput" class="text-input code-input" maxlength="6" autocomplete="off" placeholder="ABC123" inputmode="latin"></div>
+      <button id="confirmRoomAction" class="btn btn-primary btn-large modal-submit" type="button"><span>Create private room</span><b>→</b></button>
+      <p class="modal-footnote">No account needed. Just your nickname and a room code.</p>
+    </section>
+  </div>
+
+  <div id="settingsModal" class="modal-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+    <section class="modal-card settings-modal">
+      <button class="modal-close" data-close-modal="settingsModal" type="button" aria-label="Close">×</button>
+      <p class="eyebrow">MAKE IT YOURS</p><h2 id="settingsTitle">Settings</h2><p class="modal-description">Tune the table to your taste.</p>
+      <div class="setting-row"><div><b>Background music</b><small>Looping table soundtrack</small></div><label class="switch"><input id="musicEnabled" type="checkbox" checked><span></span></label></div>
+      <label class="volume-row" for="musicVolume"><span>Music volume</span><output id="musicVolumeValue">25%</output><input id="musicVolume" type="range" min="0" max="100" value="25"></label>
+      <div class="setting-row"><div><b>Sound effects</b><small>Cards, turns and reactions</small></div><label class="switch"><input id="sfxEnabled" type="checkbox" checked><span></span></label></div>
+      <label class="volume-row" for="sfxVolume"><span>Effects volume</span><output id="sfxVolumeValue">65%</output><input id="sfxVolume" type="range" min="0" max="100" value="65"></label>
+      <div class="setting-row"><div><b>Reduce motion</b><small>Use softer, shorter animations</small></div><label class="switch"><input id="reduceMotion" type="checkbox"><span></span></label></div>
+      <button id="closeSettings" class="btn btn-primary btn-large modal-submit" type="button"><span>Done</span><b>✓</b></button>
+    </section>
+  </div>
+
+  <div id="howToPlayModal" class="modal-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="howTitle">
+    <section class="modal-card how-modal">
+      <button class="modal-close" data-close-modal="howToPlayModal" type="button" aria-label="Close">×</button>
+      <p class="eyebrow">QUICK RULES</p><h2 id="howTitle">How to play</h2>
+      <div class="how-list"><div><span class="how-number">01</span><p><b>Match the card.</b><small>Play the same colour or number/symbol. Wild cards let you choose the colour.</small></p></div><div><span class="how-number">02</span><p><b>Use action cards.</b><small>Skip, Reverse, Draw Two and Wild Draw Four can change the whole turn.</small></p></div><div><span class="how-number">03</span><p><b>Call UNO before your play.</b><small>When you have two cards, press UNO before playing one. If you end up with one card without calling it, friends can catch you for a two-card penalty.</small></p></div><div><span class="how-number">04</span><p><b>Be the first to empty your hand.</b><small>House rules can change the chaos, but the goal stays the same.</small></p></div></div>
+      <button id="closeHowToPlay" class="btn btn-primary btn-large modal-submit" type="button"><span>Got it</span><b>✓</b></button>
+    </section>
+  </div>
+
+  <div id="wildPicker" class="modal-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="wildTitle">
+    <section class="modal-card wild-picker-card"><p class="eyebrow">WILD CARD</p><h2 id="wildTitle">Choose a colour</h2><div class="wild-colors"><button data-wild-color="red" class="wild-color red" type="button" aria-label="Red"></button><button data-wild-color="yellow" class="wild-color yellow" type="button" aria-label="Yellow"></button><button data-wild-color="green" class="wild-color green" type="button" aria-label="Green"></button><button data-wild-color="blue" class="wild-color blue" type="button" aria-label="Blue"></button></div><button id="cancelWild" class="text-button" type="button">Cancel</button></section>
+  </div>
+
+  <div id="unoSplash" class="uno-splash is-hidden" aria-live="assertive"><div class="uno-splash-card"><img class="uno-call-art" src="/assets/uno-call.png" alt="UNO call"><p id="unoSplashCaption">CALLED IT!</p></div></div>
+  <div id="winOverlay" class="win-overlay is-hidden" role="dialog" aria-modal="true"><div class="win-card"><div class="win-confetti" aria-hidden="true">✦　✦　✦　✦　✦</div><p class="eyebrow">ROUND COMPLETE</p><h2 id="winnerTitle">YOU WIN!</h2><p id="winnerDescription">That was a good hand.</p><button id="backToLobby" class="btn btn-primary btn-large" type="button"><span>Back to lobby</span><b>→</b></button></div></div>
+  <div id="toastStack" class="toast-stack" aria-live="polite" aria-atomic="false"></div>
+  <div id="globalLiveRegion" class="sr-only" aria-live="assertive"></div>
+</body>
+</html>

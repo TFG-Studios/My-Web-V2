@@ -1,0 +1,8 @@
+node_modules/
+.env
+.DS_Store
+npm-debug.log*
+public/cards/*.png
+!public/cards/.gitkeep
+public/assets/uno-classic-sheet.png
+__pycache__/
