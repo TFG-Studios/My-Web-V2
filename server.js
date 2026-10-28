@@ -20,7 +20,7 @@ const AUTO_SKIP_MS = 10_000;
 const VALID_SETTINGS = Object.keys(engine.DEFAULT_SETTINGS);
 
 app.disable('x-powered-by');
-app.use(express.static(path.join(__dirname, 'public'), { etag: true, maxAge: '1h' }));
+app.use(express.static(path.join(__dirname, 'docs'), { etag: true, maxAge: '1h' }));
 app.get('/healthz', (_req, res) => res.json({ ok: true, version: '2.0.0', rooms: rooms.size }));
 
 function cleanName(value) {
