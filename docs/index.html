@@ -121,7 +121,10 @@
             <div class="play-arrow" aria-hidden="true">➜</div>
             <div class="pile-wrap discard-wrap">
               <span class="pile-caption">PLAY PILE</span>
-              <div id="discardPile" class="discard-pile"><div class="card-placeholder">UNO</div></div>
+              <div class="discard-card-stage">
+                <div id="discardPile" class="discard-pile"><div class="card-placeholder">UNO</div></div>
+                <div class="direction-ring" aria-hidden="true"><span class="ring-arrow">➜</span><span class="ring-arrow ring-arrow-two">➜</span></div>
+              </div>
               <span id="currentColorBadge" class="current-color-badge"><i></i><span>RED</span></span>
             </div>
           </div>
@@ -184,6 +187,7 @@
 
   <div id="unoSplash" class="uno-splash is-hidden" aria-live="assertive"><div class="uno-splash-card"><img class="uno-call-art" src="/assets/uno-call.png" alt="UNO call"><p id="unoSplashCaption">CALLED IT!</p></div></div>
   <div id="winOverlay" class="win-overlay is-hidden" role="dialog" aria-modal="true"><div class="win-card"><div class="win-confetti" aria-hidden="true">✦　✦　✦　✦　✦</div><p class="eyebrow">ROUND COMPLETE</p><h2 id="winnerTitle">YOU WIN!</h2><p id="winnerDescription">That was a good hand.</p><button id="backToLobby" class="btn btn-primary btn-large" type="button"><span>Back to lobby</span><b>→</b></button></div></div>
+  <div id="cardFlightLayer" class="card-flight-layer" aria-hidden="true"></div>
   <div id="toastStack" class="toast-stack" aria-live="polite" aria-atomic="false"></div>
   <div id="globalLiveRegion" class="sr-only" aria-live="assertive"></div>
 </body>

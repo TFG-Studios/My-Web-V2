@@ -18,6 +18,8 @@
   let lastUnoAnimationId = null;
   let lastWinnerShown = null;
   let lastAnimatedCardId = null;
+  let lastDiscardVisualId = null;
+  let unoChallengeTicker = null;
   let lastNoticeId = null;
   let reactionTicker = null;
   let musicTicker = null;
@@ -259,7 +261,7 @@
     clone.style.top = `${from.top}px`;
     clone.style.width = `${from.width}px`;
     clone.style.height = `${from.height}px`;
-    document.body.appendChild(clone);
+    $('cardFlightLayer').appendChild(clone);
     const dx = to.left + to.width / 2 - (from.left + from.width / 2);
     const dy = to.top + to.height / 2 - (from.top + from.height / 2);
     clone.animate([
@@ -373,9 +375,17 @@
       count.textContent = String(player.count);
       const stack = document.createElement('span');
       stack.className = 'opponent-mini-hand';
-      for (let i = 0; i < Math.min(player.count, 3); i += 1) {
-        const mini = document.createElement('span'); mini.style.setProperty('--mini-index', i); stack.appendChild(mini);
+      const visibleCards = Math.min(player.count, 7);
+      for (let i = 0; i < visibleCards; i += 1) {
+        const mini = document.createElement('span');
+        const center = (visibleCards - 1) / 2;
+        const angle = (i - center) * Math.min(5, 22 / Math.max(visibleCards, 1));
+        mini.style.setProperty('--mini-index', i);
+        mini.style.setProperty('--mini-angle', `${angle}deg`);
+        mini.style.setProperty('--mini-yaw', `${(i - center) * 2.2}deg`);
+        stack.appendChild(mini);
       }
+      stack.setAttribute('aria-label', `${player.count} face-down cards`);
       badge.append(avatar, label, count);
       seat.append(badge, stack);
       if (player.isTurn) {
@@ -411,19 +421,50 @@
     }
     const isMyTurn = Boolean(me?.isTurn && !game.winnerId);
     const playableCount = hand.filter(card => localCanPlay(card, game, hand)).length;
+    const handWidth = Math.max(240, container.clientWidth || window.innerWidth);
+    const handHeight = Math.max(88, container.clientHeight || 150);
+    const heightAllowance = handWidth < 740 ? 14 : 23;
+    const maxCardHeight = Math.min(154, Math.max(70, handHeight - heightAllowance));
+    const cardHeight = Math.min(maxCardHeight, handWidth < 430 ? 113 : handWidth < 760 ? 132 : 154);
+    const cardWidth = Math.round(cardHeight * 0.667);
+    const step = hand.length > 1
+      ? Math.min(cardWidth * 0.59, Math.max(10, (handWidth - cardWidth - 8) / (hand.length - 1)))
+      : cardWidth;
+    const overlap = Math.max(0, cardWidth - step);
+    const angleStep = Math.min(2.5, 26 / Math.max(hand.length, 1));
     hand.forEach((card, index) => {
       let element = oldElements.get(card.id);
-      if (!element) element = createCardElement(card, { interactive: true });
+      const isNew = !element;
+      if (!element) {
+        element = createCardElement(card, { interactive: true });
+        element.classList.add('card-entering');
+        element.style.animationDelay = `${Math.min(index * 22, 250)}ms`;
+        window.setTimeout(() => {
+          element.classList.remove('card-entering');
+          element.style.animationDelay = '';
+        }, 700);
+      }
       const playable = isMyTurn && localCanPlay(card, game, hand);
       element.classList.toggle('is-playable', playable);
       element.classList.toggle('is-unplayable', isMyTurn && !playable);
       element.classList.toggle('card-drawn', game.drawnPlayableCardId === card.id);
       element.style.setProperty('--hand-index', index);
       element.style.setProperty('--hand-count', hand.length);
-      const fanAngle = (index - (hand.length - 1) / 2) * Math.min(2.1, 20 / Math.max(hand.length, 9));
+      element.style.setProperty('--card-width', `${cardWidth}px`);
+      element.style.setProperty('--card-height', `${cardHeight}px`);
+      element.style.setProperty('--card-overlap', `${overlap}px`);
+      const centerOffset = index - (hand.length - 1) / 2;
+      const fanAngle = centerOffset * angleStep;
+      const fanY = Math.abs(centerOffset) * Math.min(2.4, hand.length > 7 ? 1.1 : 1.7);
+      const fanYaw = centerOffset * Math.min(1.8, 14 / Math.max(hand.length, 1));
       element.style.setProperty('--hand-angle', `${fanAngle}deg`);
+      element.style.setProperty('--fan-y', `${fanY}px`);
+      element.style.setProperty('--hand-yaw', `${fanYaw}deg`);
+      element.style.zIndex = String(index + 1);
       element.disabled = !isMyTurn;
       element.setAttribute('aria-disabled', String(!isMyTurn));
+      if (isNew) element.dataset.newlyDealt = 'true';
+      else delete element.dataset.newlyDealt;
       container.appendChild(element);
     });
     $('myHandCount').textContent = `${hand.length} ${hand.length === 1 ? 'CARD' : 'CARDS'}`;
@@ -451,7 +492,13 @@
     $('challengeWildFour').disabled = !(isMyTurn && game.pendingWild4?.targetId === socket.id);
     const canCatchUno = Boolean(game.unoChallenge && game.unoChallenge.targetId !== socket.id && Date.now() <= game.unoChallenge.deadline);
     $('unoCatchBanner').classList.toggle('is-hidden', !canCatchUno);
-    if (game.unoChallenge) $('unoCatchText').textContent = `${game.unoChallenge.targetName} has one card. Catch them!`;
+    if (unoChallengeTicker) { clearTimeout(unoChallengeTicker); unoChallengeTicker = null; }
+    if (canCatchUno) {
+      $('unoCatchText').textContent = `${game.unoChallenge.targetName} has one card. Catch them!`;
+      unoChallengeTicker = window.setTimeout(() => {
+        if (state?.game?.unoChallenge?.targetId === game.unoChallenge.targetId) $('unoCatchBanner').classList.add('is-hidden');
+      }, Math.max(0, game.unoChallenge.deadline - Date.now() + 15));
+    }
     $('swapBanner').classList.toggle('is-hidden', game.awaitingSwapPlayerId !== socket.id);
     if (game.awaitingSwapPlayerId === socket.id) $('handHint').textContent = 'Choose an opponent above to swap hands.';
   }
@@ -469,7 +516,7 @@
     flying.style.width = `${Math.max(14, from.width)}px`;
     flying.style.height = `${Math.max(20, from.height)}px`;
     flying.style.borderWidth = '1px';
-    document.body.appendChild(flying);
+    $('cardFlightLayer').appendChild(flying);
     const dx = to.left + to.width / 2 - (from.left + from.width / 2);
     const dy = to.top + to.height / 2 - (from.top + from.height / 2);
     const scale = Math.min(7, Math.max(3.6, to.width / Math.max(from.width, 1)));
@@ -493,15 +540,23 @@
     $('directionIndicator').textContent = game.direction === 1 ? '↻' : '↺';
     $('directionIndicator').classList.toggle('direction-reverse', game.direction === -1);
     $('deckCount').textContent = `${game.drawCount} ${game.drawCount === 1 ? 'card' : 'cards'}`;
-    $('discardPile').replaceChildren();
-    $('discardPile').classList.toggle('direction-reverse', game.direction === -1);
+    const discardPile = $('discardPile');
+    discardPile.replaceChildren();
     const top = game.top;
+    const isNewDiscard = Boolean(top && game.lastCardId && game.lastCardId !== lastDiscardVisualId);
     if (top) {
       const topCard = createCardElement(top, { small: true });
       topCard.classList.add('discard-top-card');
-      if (top.color === 'wild') topCard.dataset.activeColor = game.color || 'red';
-      $('discardPile').appendChild(topCard);
+      if (!isNewDiscard || prefs.reduceMotion) topCard.style.animation = 'none';
+      if (top.color === 'wild') {
+        topCard.dataset.activeColor = game.color || 'red';
+        topCard.style.setProperty('--active-color', COLOR_HEX[game.color] || COLOR_HEX.red);
+      }
+      discardPile.appendChild(topCard);
+      if (isNewDiscard) lastDiscardVisualId = game.lastCardId;
     }
+    const ring = document.querySelector('.direction-ring');
+    ring?.classList.toggle('direction-reverse', game.direction === -1);
     const currentColor = game.color || 'red';
     $('currentColorBadge').style.setProperty('--current-color', COLOR_HEX[currentColor] || COLOR_HEX.red);
     $('currentColorBadge').querySelector('i').style.background = COLOR_HEX[currentColor] || COLOR_HEX.red;
@@ -626,6 +681,9 @@
     playSfx('click');
   }
   $('splashScreen').addEventListener('click', startExperience);
+  window.addEventListener('resize', () => {
+    if (state?.started && state.game) renderHand(state);
+  }, { passive: true });
   $('splashScreen').addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') startExperience(); });
   $('pressStart').addEventListener('click', event => { event.stopPropagation(); startExperience(); });
   $('createRoomOpen').addEventListener('click', () => { playSfx('click'); openRoomSetup('create'); });
@@ -678,7 +736,15 @@
   $('passTurn').addEventListener('click', () => socket.emit('passTurn'));
   $('takePenalty').addEventListener('click', () => socket.emit('drawPenalty'));
   $('unoButton').addEventListener('click', () => { socket.emit('callUno'); playSfx('uno'); });
-  $('catchUnoButton').addEventListener('click', () => { socket.emit('catchUno', state?.game?.unoChallenge?.targetId); playSfx('action'); });
+  $('catchUnoButton').addEventListener('click', () => {
+    const challenge = state?.game?.unoChallenge;
+    if (!challenge || Date.now() > challenge.deadline || challenge.targetId === socket.id) {
+      $('unoCatchBanner').classList.add('is-hidden');
+      return;
+    }
+    socket.emit('catchUno', challenge.targetId);
+    playSfx('action');
+  });
   $('challengeWildFour').addEventListener('click', () => { socket.emit('challengeWild4'); playSfx('action'); });
   $('acceptWildFour').addEventListener('click', () => { socket.emit('drawPenalty'); playSfx('draw'); });
   $('pressSix').addEventListener('click', () => { if (state?.game?.sixReaction) socket.emit('pressSix', state.game.sixReaction.id); playSfx('reaction'); });
