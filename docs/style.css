@@ -553,3 +553,91 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--yellow); ou
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: .01ms !important; }
 }
 html.reduce-motion *, html.reduce-motion *::before, html.reduce-motion *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+
+
+/* UNO PC-inspired visual overhaul — branch-only overrides */
+html, body { width: 100%; height: 100%; overflow: hidden; }
+body { background: linear-gradient(135deg, #c90e2e 0%, #f02c3f 42%, #ffb52f 100%); }
+.game-screen {
+  min-height: 0;
+  background:
+    radial-gradient(ellipse at 50% 38%, #ffcf4a36 0%, transparent 54%),
+    linear-gradient(135deg, #c90e2e 0%, #ee263d 52%, #f7a52e 100%);
+}
+.game-screen::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: .16;
+  background: repeating-linear-gradient(135deg, transparent 0 42px, #fff 43px 44px, transparent 45px 86px);
+}
+.game-topbar { background: #7c071dc9; border-bottom-color: #ffffff26; }
+.table-felt {
+  width: min(94%, 1240px);
+  max-height: none;
+  border: 0;
+  border-radius: 26px;
+  background: linear-gradient(145deg, #a80f2a70, #78102066);
+  box-shadow: 0 20px 44px #65051e38, inset 0 0 0 1px #ffffff20;
+  transform: perspective(1200px) rotateX(2deg);
+}
+.table-felt::before, .table-felt::after { opacity: .08; }
+.table-logo { opacity: .3; transform: rotate(-8deg); }
+.turn-readout { background: #770c20b8; border-color: #ffffff35; }
+.direction-indicator { position: relative; }
+.discard-pile { overflow: visible; }
+.discard-pile::before {
+  content: "";
+  position: absolute;
+  inset: -13px -10px;
+  z-index: 0;
+  border: 3px solid #ffe15a9c;
+  border-left-color: #ffe15a;
+  border-right-color: #ffe15a;
+  border-radius: 50%;
+  transform: skew(-12deg) rotate(0deg);
+  animation: discard-orbit 2.8s linear infinite;
+  pointer-events: none;
+}
+.discard-pile.direction-reverse::before { animation-direction: reverse; }
+@keyframes discard-orbit {
+  from { transform: skew(-12deg) rotate(0deg); }
+  to { transform: skew(-12deg) rotate(360deg); }
+}
+.discard-pile .discard-top-card { z-index: 1; transform: perspective(650px) rotateY(-5deg) rotateZ(-2deg); }
+.my-hand { overflow-x: hidden; overflow-y: visible; scrollbar-width: none; padding-inline: clamp(8px, 2vw, 24px); }
+.my-hand::-webkit-scrollbar { display: none; }
+.my-hand .playing-card { filter: none; opacity: 1; }
+.my-hand .playing-card.is-unplayable { filter: none; opacity: 1; }
+.my-hand .playing-card.is-unplayable:not(:disabled) { cursor: pointer; }
+.my-hand .playing-card.is-playable { transform: translateY(-5px) rotate(var(--hand-angle, 0deg)) skew(-1deg, 0deg); }
+.my-hand .playing-card.is-unplayable:not(:disabled):hover { transform: translateY(-4px) rotate(var(--hand-angle, 0deg)) skew(-1deg, 0deg); }
+.card-rejected { animation: card-reject-shake .38s ease-in-out !important; }
+@keyframes card-reject-shake {
+  0%, 100% { translate: 0 0; }
+  20%, 60% { translate: -7px 0; }
+  40%, 80% { translate: 7px 0; }
+}
+.uno-button.is-hidden { display: none !important; }
+.uno-catch-banner { background: #ffcf37; color: #5d1020; border: 2px solid #fff0a8; box-shadow: 0 10px 30px #69051e40; }
+.uno-catch-banner button { color: #fff; background: #d10f30; }
+.opponent-seat { perspective: 700px; }
+.opponent-mini-hand span { transform: rotateY(-14deg) rotateZ(calc((var(--mini-index, 0) - 1) * 8deg)); }
+.playing-card.card-drawn { animation: card-flip-in .48s cubic-bezier(.2,.8,.2,1) both; }
+@keyframes card-flip-in {
+  0% { transform: perspective(700px) rotateY(90deg) scale(.82); opacity: .3; }
+  65% { transform: perspective(700px) rotateY(-8deg) scale(1.04); opacity: 1; }
+  100% { transform: perspective(700px) rotateY(0) scale(1); opacity: 1; }
+}
+@media (max-width: 640px) {
+  .game-screen { height: 100dvh; min-height: 0; }
+  .table-felt { width: 98%; border-radius: 18px; transform: none; }
+  .center-table { width: min(96%, 510px); }
+  .my-hand { justify-content: flex-start; overflow-x: auto; padding-bottom: 8px; }
+  .my-hand .playing-card { flex-basis: clamp(54px, 15vw, 76px); width: clamp(54px, 15vw, 76px); margin-left: clamp(-29px, -6vw, -14px); }
+  .my-hand .playing-card:first-child { margin-left: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .discard-pile::before { animation: none; }
+}
