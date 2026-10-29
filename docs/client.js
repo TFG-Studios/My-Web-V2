@@ -273,7 +273,16 @@
     if (!state?.game || state.game.winnerId) return;
     const me = state.players.find(player => player.id === socket.id);
     if (!me?.isTurn) return toast('Wait for your turn.', 'warning');
-    if (!localCanPlay(card, state.game, state.game.hand || [])) return toast('That card is not playable right now.', 'warning');
+    if (!localCanPlay(card, state.game, state.game.hand || [])) {
+      if (element && !prefs.reduceMotion) {
+        element.classList.remove('card-rejected');
+        void element.offsetWidth;
+        element.classList.add('card-rejected');
+        window.setTimeout(() => element.classList.remove('card-rejected'), 420);
+      }
+      playSfx('error');
+      return toast('That card cannot be played right now.', 'warning');
+    }
     if (card.color === 'wild') {
       pendingWildCardId = card.id;
       $('wildPicker').classList.remove('is-hidden');
@@ -413,8 +422,8 @@
       element.style.setProperty('--hand-count', hand.length);
       const fanAngle = (index - (hand.length - 1) / 2) * Math.min(2.1, 20 / Math.max(hand.length, 9));
       element.style.setProperty('--hand-angle', `${fanAngle}deg`);
-      element.disabled = !isMyTurn || !playable;
-      element.setAttribute('aria-disabled', String(!isMyTurn || !playable));
+      element.disabled = !isMyTurn;
+      element.setAttribute('aria-disabled', String(!isMyTurn));
       container.appendChild(element);
     });
     $('myHandCount').textContent = `${hand.length} ${hand.length === 1 ? 'CARD' : 'CARDS'}`;
@@ -424,6 +433,7 @@
     $('handHint').textContent = game.winnerId ? 'Round complete' : isMyTurn ? (game.drawnPlayableCardId ? 'You drew a playable card · play it or pass' : playableCount ? 'Your turn · choose a glowing card' : 'No playable card · draw from the pile') : 'Waiting for your turn…';
     $('handSortLabel').textContent = isMyTurn && playableCount ? `${playableCount} PLAYABLE` : 'PLAYABLE CARDS GLOW';
     const canCallUno = isMyTurn && hand.length === 2 && playableCount > 0 && game.pendingDraw === 0 && !game.pendingWild4 && !game.drawnPlayableCardId;
+    $('unoButton').classList.toggle('is-hidden', !canCallUno && !game.armedUno);
     $('unoButton').disabled = !canCallUno || Boolean(game.armedUno);
     $('unoButton').classList.toggle('uno-ready', canCallUno && !game.armedUno);
     $('unoButton').classList.toggle('uno-called', Boolean(game.armedUno));
@@ -439,7 +449,8 @@
     }
     $('wildFourBanner').classList.toggle('is-hidden', !(isMyTurn && game.pendingWild4?.targetId === socket.id));
     $('challengeWildFour').disabled = !(isMyTurn && game.pendingWild4?.targetId === socket.id);
-    $('unoCatchBanner').classList.toggle('is-hidden', !game.unoChallenge || game.unoChallenge.targetId === socket.id);
+    const canCatchUno = Boolean(game.unoChallenge && game.unoChallenge.targetId !== socket.id && Date.now() <= game.unoChallenge.deadline);
+    $('unoCatchBanner').classList.toggle('is-hidden', !canCatchUno);
     if (game.unoChallenge) $('unoCatchText').textContent = `${game.unoChallenge.targetName} has one card. Catch them!`;
     $('swapBanner').classList.toggle('is-hidden', game.awaitingSwapPlayerId !== socket.id);
     if (game.awaitingSwapPlayerId === socket.id) $('handHint').textContent = 'Choose an opponent above to swap hands.';
@@ -483,10 +494,12 @@
     $('directionIndicator').classList.toggle('direction-reverse', game.direction === -1);
     $('deckCount').textContent = `${game.drawCount} ${game.drawCount === 1 ? 'card' : 'cards'}`;
     $('discardPile').replaceChildren();
+    $('discardPile').classList.toggle('direction-reverse', game.direction === -1);
     const top = game.top;
     if (top) {
       const topCard = createCardElement(top, { small: true });
       topCard.classList.add('discard-top-card');
+      if (top.color === 'wild') topCard.dataset.activeColor = game.color || 'red';
       $('discardPile').appendChild(topCard);
     }
     const currentColor = game.color || 'red';
