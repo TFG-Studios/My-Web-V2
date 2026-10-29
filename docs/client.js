@@ -437,7 +437,11 @@
       if (!element) {
         element = createCardElement(card, { interactive: true });
         element.classList.add('card-entering');
-        window.setTimeout(() => element.classList.remove('card-entering'), 430);
+        element.style.animationDelay = `${Math.min(index * 22, 250)}ms`;
+        window.setTimeout(() => {
+          element.classList.remove('card-entering');
+          element.style.animationDelay = '';
+        }, 700);
       }
       const playable = isMyTurn && localCanPlay(card, game, hand);
       element.classList.toggle('is-playable', playable);
