@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#cf102d">
+  <meta name="theme-color" content="#191b20">
   <meta name="description" content="A colourful, real-time multiplayer card game. Create a private room and play with friends.">
   <title>UNO — Play with friends</title>
   <link rel="icon" href="./assets/favicon.svg">
@@ -17,10 +17,10 @@
 
   <main id="splashScreen" class="screen splash-screen" aria-label="Start screen">
     <div class="splash-card-stack" aria-hidden="true">
-      <span class="splash-card splash-card-red">7</span>
-      <span class="splash-card splash-card-blue">↻</span>
-      <span class="splash-card splash-card-yellow">2</span>
-      <span class="splash-card splash-card-green">+2</span>
+      <img class="splash-card splash-card-red" src="/cards/R7.png" alt="">
+      <img class="splash-card splash-card-blue" src="/cards/B2.png" alt="">
+      <img class="splash-card splash-card-yellow" src="/cards/Y7.png" alt="">
+      <img class="splash-card splash-card-green" src="/cards/G9.png" alt="">
     </div>
     <div class="uno-brand splash-brand" aria-label="UNO">
       <span>UNO</span><i aria-hidden="true">®</i>
@@ -35,7 +35,7 @@
 
   <main id="mainMenu" class="screen main-menu is-hidden" aria-label="Main menu">
     <header class="menu-topbar">
-      <div class="small-brand"><span class="brand-mark-mini">U</span><span>UNO <small>ONLINE TABLE</small></span></div>
+      <div class="small-brand"><span class="brand-mark-mini">UNO</span><span><small>ONLINE TABLE</small></span></div>
       <div class="topbar-right">
         <span class="online-pill"><i></i> PRIVATE MULTIPLAYER</span>
         <button id="openSettings" class="icon-button" type="button" aria-label="Settings" title="Settings">⚙</button>
@@ -54,10 +54,11 @@
       </div>
       <div class="menu-art" aria-hidden="true">
         <div class="art-orbit orbit-one"></div><div class="art-orbit orbit-two"></div>
-        <div class="art-card art-card-back"><span>UNO</span></div>
-        <div class="art-card art-card-blue"><strong>↻</strong><small>REVERSE</small></div>
-        <div class="art-card art-card-yellow"><strong>7</strong><small>YOUR MOVE</small></div>
-        <div class="art-card art-card-red"><strong>2</strong><small>MAKE IT COUNT</small></div>
+        <img class="art-card art-card-back" src="/cards/BACK.png" alt="">
+        <img class="art-card art-card-blue" src="/cards/B2.png" alt="">
+        <img class="art-card art-card-yellow" src="/cards/Y7.png" alt="">
+        <img class="art-card art-card-red" src="/cards/R2.png" alt="">
+        <span class="art-card-caption">YOUR MOVE</span>
         <div class="art-burst">LET'S<br>PLAY!</div>
       </div>
     </section>
@@ -67,7 +68,7 @@
   <main id="lobbyScreen" class="screen lobby-screen is-hidden" aria-label="Room lobby">
     <header class="menu-topbar lobby-topbar">
       <button id="backToMenu" class="back-link" type="button">← <span>Menu</span></button>
-      <div class="small-brand"><span class="brand-mark-mini">U</span><span>UNO <small>PRIVATE TABLE</small></span></div>
+      <div class="small-brand"><span class="brand-mark-mini">UNO</span><span><small>PRIVATE TABLE</small></span></div>
       <button id="lobbySettings" class="icon-button" type="button" aria-label="Settings" title="Settings">⚙</button>
     </header>
     <section class="lobby-layout">
