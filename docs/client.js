@@ -423,7 +423,8 @@
     const playableCount = hand.filter(card => localCanPlay(card, game, hand)).length;
     const handWidth = Math.max(240, container.clientWidth || window.innerWidth);
     const handHeight = Math.max(88, container.clientHeight || 150);
-    const maxCardHeight = Math.min(154, Math.max(78, handHeight - 13));
+    const heightAllowance = handWidth < 740 ? 14 : 23;
+    const maxCardHeight = Math.min(154, Math.max(70, handHeight - heightAllowance));
     const cardHeight = Math.min(maxCardHeight, handWidth < 430 ? 113 : handWidth < 760 ? 132 : 154);
     const cardWidth = Math.round(cardHeight * 0.667);
     const step = hand.length > 1
