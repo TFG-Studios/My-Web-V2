@@ -46,3 +46,9 @@
 - Hand hover now resolved from layout, not transformed boxes: no flicker, no neighbour stealing hover; neighbours spread to reveal the lifted card. Hand is auto-sorted by colour/value; arrow keys + Enter work; on touch, first tap lifts and second tap plays.
 - Popups removed: toasts/notices, banners, wild-colour modal, 6-reaction overlay and leave confirm are replaced by a single status line, seat bubbles (+N), contextual pills, an on-table colour wheel, a round TAP button and a two-tap leave. UNO catch is a CATCH! chip on the offender's seat.
 - New `docs/game.css`; old game rules stripped from `docs/style.css`. Re-theme the table via `--bg-1/2/3` in `.field`.
+
+## V4
+- Splash, main menu and room rebuilt in the PC-UNO look: one rounded font (Baloo 2), red/orange rays, 3D floating cards, chunky skewed buttons, square avatars + blue nameplates, icon-only house rules. New `docs/menu.css`.
+- Colour wheel is a thick 3D pie shown to every player (server relays `wildPicking`), including live slice highlight.
+- UNO button restyled as an arcade/bomb-style hazard button; "UNO!" is now a 3D extruded effect with stars, placed in front of the caller and oriented the way the caller sees it.
+- Draw pile is a real 12-card stack at the top-left of the table, rotated -45°. Turn text/counters trimmed; static files are served with no-cache.

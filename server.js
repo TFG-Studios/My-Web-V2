@@ -774,6 +774,19 @@ io.on('connection', socket => {
     else sendState(room);
   });
 
+  // Let everyone watch the colour wheel while the current player is choosing.
+  socket.on('wildPicking', payload => {
+    const room = findRoomBySocket(socket.id);
+    if (!room?.game || room.game.winnerId) return;
+    if (room.players[room.game.turn]?.id !== socket.id) return;
+    const colors = ['red', 'yellow', 'green', 'blue'];
+    io.to(room.code).emit('wildPicking', {
+      playerId: socket.id,
+      active: Boolean(payload?.active),
+      hover: colors.includes(payload?.hover) ? payload.hover : null,
+    });
+  });
+
   socket.on('leaveRoom', () => {
     const room = findRoomBySocket(socket.id);
     if (!room) return;

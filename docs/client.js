@@ -67,7 +67,8 @@
   function openModal(id) { $(id)?.classList.remove('is-hidden'); }
   function closeModal(id) { $(id)?.classList.add('is-hidden'); }
   function hideAllModals() {
-    ['roomSetupModal', 'settingsModal', 'howToPlayModal', 'wildPicker'].forEach(closeModal);
+    ['roomSetupModal', 'settingsModal', 'howToPlayModal'].forEach(closeModal);
+    closeWildWheel();
     pendingWildCardId = null;
   }
 
@@ -355,13 +356,24 @@
     hoverIndex = -1; armedId = null;
     if (card.color === 'wild') {
       pendingWildCardId = card.id;
-      $('wildPicker').classList.remove('is-hidden');
+      openWildWheel();
       playSfx('click');
       applyHandTransforms();
       return;
     }
     playSfx(['Draw2', 'Wild4', 'Skip', 'Reverse'].includes(card.value) ? 'action' : 'card');
     socket.emit('playCard', { cardId: card.id });
+  }
+  function openWildWheel() {
+    const stage = $('wildPicker');
+    stage.classList.remove('is-hidden', 'is-remote');
+    socket.emit('wildPicking', { active: true });
+  }
+  function closeWildWheel() {
+    const stage = $('wildPicker');
+    if (!stage || stage.classList.contains('is-hidden') || stage.classList.contains('is-remote')) return;
+    stage.classList.add('is-hidden');
+    socket.emit('wildPicking', { active: false });
   }
   function rejectCard(element) {
     if (element && !prefs.reduceMotion) {
@@ -375,35 +387,39 @@
 
   function renderLobby(next) {
     $('roomCodeDisplay').textContent = next.code || '------';
-    $('playerCount').textContent = `${next.players.length}/5`;
     const isHost = socket.id === next.hostId;
-    $('hostBadge').classList.toggle('is-hidden', !isHost);
-    $('rulesLockLabel').textContent = isHost ? 'HOST ONLY' : 'VIEW ONLY';
-    $('lobbyPlayers').replaceChildren();
-    const palette = ['red', 'blue', 'yellow', 'green', 'purple'];
-    next.players.forEach((player, index) => {
-      const row = document.createElement('div');
-      row.className = `lobby-player-row${player.id === next.hostId ? ' player-is-host' : ''}${!player.connected ? ' player-offline' : ''}`;
+    const box = $('lobbyPlayers');
+    box.replaceChildren();
+    for (let index = 0; index < 5; index += 1) {
+      const player = next.players[index];
+      const slot = document.createElement('div');
       const avatar = document.createElement('span');
-      avatar.className = `avatar avatar-${palette[index % palette.length]}`;
-      avatar.textContent = player.name.slice(0, 1).toUpperCase();
-      const identity = document.createElement('div');
-      identity.className = 'lobby-player-identity';
-      const name = document.createElement('b');
-      name.textContent = player.name + (player.id === socket.id ? ' (you)' : '');
-      const status = document.createElement('small');
-      status.textContent = !player.connected ? 'Reconnecting…' : player.id === next.hostId ? 'HOST · DEALER' : 'READY TO PLAY';
-      identity.append(name, status);
-      const right = document.createElement('span');
-      right.className = 'player-status-icon';
-      right.textContent = !player.connected ? '…' : player.id === next.hostId ? '★' : '✓';
-      row.append(avatar, identity, right);
-      $('lobbyPlayers').appendChild(row);
-    });
+      const plate = document.createElement('span');
+      plate.className = 'u-plate';
+      if (!player) {
+        slot.className = 'u-slot is-empty';
+        avatar.className = 'u-avatar';
+        avatar.textContent = '+';
+        plate.textContent = '—';
+      } else {
+        slot.className = `u-slot${!player.connected ? ' is-offline' : ''}`;
+        avatar.className = `u-avatar u-av-${index % 5}`;
+        avatar.textContent = player.name.slice(0, 1).toUpperCase();
+        if (player.id === next.hostId) {
+          const crown = document.createElement('i');
+          crown.className = 'u-crown';
+          crown.textContent = '★';
+          avatar.appendChild(crown);
+        }
+        plate.textContent = player.name;
+      }
+      slot.append(avatar, plate);
+      box.appendChild(slot);
+    }
     const canStart = isHost && next.players.length >= 2;
+    $('startGame').classList.toggle('is-hidden', !isHost);
     $('startGame').disabled = !canStart;
-    $('startGame').classList.toggle('btn-disabled', !canStart);
-    $('lobbyHint').textContent = !isHost ? 'Waiting for the host to deal the cards…' : next.players.length < 2 ? 'Waiting for one more player…' : 'Everyone is here. Deal whenever you are ready.';
+    $('lobbyHint').textContent = !isHost ? 'Waiting for host…' : next.players.length < 2 ? 'Waiting for players…' : '';
     const settingsIds = {
       stacking: 'ruleStacking', zeroSeven: 'ruleZeroSeven',
       drawUntilPlayable: 'ruleDrawUntil', sixReaction: 'ruleSixReaction',
@@ -650,7 +666,7 @@
       });
     }
 
-    $('myHandCount').textContent = `${hand.length} ${hand.length === 1 ? 'CARD' : 'CARDS'}`;
+    $('myHandCount').textContent = String(hand.length);
     $('myAvatar').textContent = (me?.name || 'Y').slice(0, 1).toUpperCase();
     $('myNameLabel').textContent = (me?.name || 'YOU').toUpperCase();
     $('youSeat').classList.toggle('is-turn', isMyTurn);
@@ -684,15 +700,12 @@
     const game = next.game;
     const el = $('tableMessage');
     const me = next.players.find(player => player.id === socket.id);
-    const current = next.players[game.turn];
     let text = '';
     let mine = false;
-    if (game.winnerId) text = `${game.winnerName} wins!`;
-    else if (game.awaitingSwapPlayerId === socket.id) text = 'Pick a player to swap hands';
-    else if (game.pendingWild4?.targetId === socket.id) text = 'Challenge the +4 or draw 4';
-    else if (me?.isTurn && game.pendingDraw > 0) text = `Stack a +${game.pendingDraw === 2 ? 2 : 4} or take ${game.pendingDraw}`;
-    else if (me?.isTurn) { text = game.drawnPlayableCardId ? 'Play it or pass' : 'Your turn'; mine = true; }
-    else if (current) text = `${current.name}'s turn`;
+    if (!game.winnerId) {
+      if (game.awaitingSwapPlayerId === socket.id) text = 'Pick a player';
+      else if (me?.isTurn && !game.pendingDraw && !game.pendingWild4 && !game.drawnPlayableCardId) { text = 'Your turn'; mine = true; }
+    }
     el.textContent = text;
     el.className = `status-line${mine ? ' is-mine' : ''}`;
   }
@@ -812,27 +825,65 @@
     if (game.unoAnnouncement && game.unoAnnouncement.id !== lastUnoAnimationId) {
       lastUnoAnimationId = game.unoAnnouncement.id;
       const caller = game.unoAnnouncement.playerId;
-      showUnoSplash(caller === socket.id ? 'UNO!' : `${next.players.find(p => p.id === caller)?.name || 'PLAYER'}: UNO!`);
+      showUnoFx(caller);
       playSfx('uno');
     }
     if (game.winnerId && lastWinnerShown !== `${game.roundId}:${game.winnerId}`) {
       lastWinnerShown = `${game.roundId}:${game.winnerId}`;
       showWinner(game.winnerId === socket.id, game.winnerName);
     }
+    if (lastGameSnapshot && (game.lastCardId !== lastGameSnapshot.lastCardId || game.turn !== lastGameSnapshot.turn)) {
+      const stage = $('wildPicker');
+      if (stage.classList.contains('is-remote')) { stage.classList.add('is-hidden'); stage.classList.remove('is-remote'); }
+    }
     if (lastGameSnapshot && game.lastCardId && game.lastCardId !== lastGameSnapshot.lastCardId) {
       playSfx(['Skip', 'Reverse', 'Draw2', 'Wild4'].includes(game.lastAction) ? 'action' : 'card');
     }
-    lastGameSnapshot = { lastCardId: game.lastCardId, lastAction: game.lastAction };
+    lastGameSnapshot = { lastCardId: game.lastCardId, lastAction: game.lastAction, turn: game.turn };
   }
 
-  function showUnoSplash(caption) {
-    $('unoSplashCaption').textContent = caption;
-    const splash = $('unoSplash');
-    splash.classList.remove('is-hidden');
-    splash.classList.remove('uno-splash-in');
-    void splash.offsetWidth;
-    splash.classList.add('uno-splash-in');
-    window.setTimeout(() => splash.classList.add('is-hidden'), prefs.reduceMotion ? 600 : 1150);
+  // 3D "UNO!" lying on the table in front of the caller, upright from THEIR point of view
+  // (everyone sees the same thing, so it is upside-down/sideways for people seated elsewhere).
+  function showUnoFx(callerId) {
+    const layer = $('unoFx');
+    if (!layer || !layout) return;
+    const target = centerOf($('discardPile').getBoundingClientRect());
+    let from;
+    if (callerId === socket.id) {
+      const hand = $('myHand').getBoundingClientRect();
+      from = { x: hand.left + hand.width / 2, y: hand.bottom - layout.handH * 0.55 };
+    } else {
+      const avatar = document.querySelector(`.seat[data-player-id="${CSS.escape(callerId)}"] .seat-avatar`);
+      if (!avatar) return;
+      from = centerOf(avatar.getBoundingClientRect());
+    }
+    const spot = { x: from.x + (target.x - from.x) * 0.55, y: from.y + (target.y - from.y) * 0.55 };
+    const rz = Math.round(Math.atan2(target.x - from.x, -(target.y - from.y)) * 180 / Math.PI);
+    const fx = document.createElement('div');
+    fx.className = 'uno-fx';
+    fx.style.left = `${spot.x}px`; fx.style.top = `${spot.y}px`; fx.style.setProperty('--rz', `${rz}deg`);
+    const word = document.createElement('div');
+    word.className = 'uno-fx-word';
+    ['U', 'N', 'O', '!'].forEach((ch, i) => { const s = document.createElement('span'); s.textContent = ch; s.style.setProperty('--i', String(i)); word.appendChild(s); });
+    fx.appendChild(word);
+    if (!prefs.reduceMotion) {
+      const colors = ['#ee2a3b', '#ffd51f', '#25b25e', '#2a86dc', '#ffffff'];
+      for (let i = 0; i < 18; i += 1) {
+        const star = document.createElement('i');
+        const angle = Math.random() * Math.PI * 2, dist = 140 + Math.random() * 230;
+        star.className = 'uno-fx-star';
+        star.style.setProperty('--tx', `${Math.cos(angle) * dist * 1.25}px`);
+        star.style.setProperty('--ty', `${Math.sin(angle) * dist * 0.8}px`);
+        star.style.setProperty('--tz', `${60 + Math.random() * 220}px`);
+        star.style.setProperty('--s', `${34 + Math.random() * 38}px`);
+        star.style.setProperty('--rot', `${(Math.random() - 0.5) * 720}deg`);
+        star.style.setProperty('--d', `${0.05 + Math.random() * 0.3}s`);
+        star.style.setProperty('--c', colors[i % colors.length]);
+        fx.appendChild(star);
+      }
+    }
+    layer.appendChild(fx);
+    window.setTimeout(() => fx.remove(), 2400);
   }
 
   function showWinner(isMe, name) {
@@ -873,10 +924,10 @@
   }
   function openRoomSetup(mode) {
     setupMode = mode;
-    $('setupTitle').textContent = mode === 'create' ? 'Create a room' : 'Join your crew';
+    $('setupTitle').textContent = mode === 'create' ? 'New room' : 'Join room';
     $('setupEyebrow').textContent = mode === 'create' ? 'MAKE IT A PRIVATE TABLE' : 'YOU HAVE AN INVITATION';
     $('setupDescription').textContent = mode === 'create' ? "Pick your nickname and we'll set up a table for your crew." : "Enter your friend's room code and we'll pull up a seat.";
-    $('confirmRoomAction').querySelector('span').textContent = mode === 'create' ? 'Create private room' : 'Join the table';
+    $('confirmRoomAction').querySelector('span').textContent = mode === 'create' ? 'Create' : 'Join';
     $('joinCodeField').classList.toggle('is-hidden', mode !== 'join');
     $('roomCodeInput').value = '';
     openModal('roomSetupModal');
@@ -941,7 +992,7 @@
   $('startGame').addEventListener('click', () => { if (!state || state.hostId !== socket.id) return; socket.emit('startGame'); playSfx('click'); });
   $('copyRoomCode').addEventListener('click', async () => {
     const code = state?.code || roomCode;
-    try { await navigator.clipboard.writeText(code); toast('Room code copied. Send it to your friends!', 'success'); }
+    try { await navigator.clipboard.writeText(code); toast('Copied!', 'success'); }
     catch { window.prompt('Copy this room code:', code); }
   });
   $('leaveGame').addEventListener('click', () => {
@@ -949,7 +1000,7 @@
     const label = button.querySelector('em');
     if (!button.classList.contains('is-confirm')) {
       button.classList.add('is-confirm');
-      label.textContent = 'Tap again to leave';
+      label.textContent = 'Leave?';
       leaveTimer = window.setTimeout(() => { button.classList.remove('is-confirm'); label.textContent = 'Leave'; }, 3000);
       return;
     }
@@ -973,12 +1024,38 @@
   $('challengeWildFour').addEventListener('click', () => { socket.emit('challengeWild4'); playSfx('action'); });
   $('acceptWildFour').addEventListener('click', () => { socket.emit('drawPenalty'); playSfx('draw'); });
   $('reactionOverlay').addEventListener('click', () => { if (state?.game?.sixReaction?.active) socket.emit('pressSix', state.game.sixReaction.id); playSfx('reaction'); });
-  $('cancelWild').addEventListener('click', () => { pendingWildCardId = null; closeModal('wildPicker'); });
+  (() => {
+    const depth = $('wheelDepth');
+    for (let i = 0; i < 14; i += 1) { const layer = document.createElement('i'); layer.style.setProperty('--i', String(i)); depth.appendChild(layer); }
+    document.querySelectorAll('.wheel-slice').forEach(slice => {
+      const tell = color => { if (!$('wildPicker').classList.contains('is-remote')) socket.emit('wildPicking', { active: true, hover: color }); };
+      slice.addEventListener('pointerenter', () => tell(slice.dataset.wildColor));
+      slice.addEventListener('pointerleave', () => tell(null));
+    });
+    const stack = $('drawStack');
+    for (let i = 11; i >= 0; i -= 1) {
+      const layer = document.createElement('i');
+      layer.style.setProperty('--x', `calc(var(--pile-w) * ${(i * 0.0085).toFixed(4)})`);
+      layer.style.setProperty('--y', `calc(var(--pile-w) * ${(i * 0.013).toFixed(4)})`);
+      layer.style.setProperty('--r', `${(((i * 7919) % 17) / 17 - 0.5) * 1.8}deg`);
+      layer.style.setProperty('--b', String(1 - i * 0.03));
+      stack.appendChild(layer);
+    }
+  })();
+  socket.on('wildPicking', data => {
+    if (!data || data.playerId === socket.id) return;
+    const stage = $('wildPicker');
+    if (!data.active) { stage.classList.add('is-hidden'); stage.classList.remove('is-remote'); return; }
+    stage.classList.remove('is-hidden');
+    stage.classList.add('is-remote');
+    stage.querySelectorAll('.wheel-slice').forEach(slice => slice.classList.toggle('is-hover', slice.dataset.wildColor === data.hover));
+  });
+  $('cancelWild').addEventListener('click', () => { pendingWildCardId = null; closeWildWheel(); });
   document.querySelectorAll('[data-wild-color]').forEach(button => button.addEventListener('click', () => {
     const color = button.dataset.wildColor;
     const cardId = pendingWildCardId;
     pendingWildCardId = null;
-    closeModal('wildPicker');
+    closeWildWheel();
     if (cardId) socket.emit('playCard', { cardId, color });
     playSfx('action');
   }));
