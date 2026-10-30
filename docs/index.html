@@ -123,12 +123,15 @@
         </div>
       </header>
 
+      <div class="ring-layer" aria-hidden="true">
+          <div id="dirRing" class="dir-ring" aria-hidden="true">
+            <svg viewBox="0 0 200 200"><circle class="ring-band" cx="100" cy="100" r="92"/><circle class="ring-track" cx="100" cy="100" r="92"/><path class="ring-arrow" transform="rotate(0 100 100)" d="M92 -6 L132 8 L92 22 L104 8 Z"/><path class="ring-arrow" transform="rotate(90 100 100)" d="M92 -6 L132 8 L92 22 L104 8 Z"/><path class="ring-arrow" transform="rotate(180 100 100)" d="M92 -6 L132 8 L92 22 L104 8 Z"/><path class="ring-arrow" transform="rotate(270 100 100)" d="M92 -6 L132 8 L92 22 L104 8 Z"/></svg>
+          </div>
+      </div>
+
       <div id="opponents" class="opponents" aria-label="Opponents"></div>
 
       <section class="center" aria-label="Play area">
-        <div id="dirRing" class="dir-ring" aria-hidden="true">
-          <svg viewBox="0 0 200 200"><circle class="ring-track" cx="100" cy="100" r="92"/><path class="ring-arrow" d="M106 0 L126 8 L106 16 L112 8 Z"/><path class="ring-arrow" transform="rotate(90 100 100)" d="M106 0 L126 8 L106 16 L112 8 Z"/><path class="ring-arrow" transform="rotate(180 100 100)" d="M106 0 L126 8 L106 16 L112 8 Z"/><path class="ring-arrow" transform="rotate(270 100 100)" d="M106 0 L126 8 L106 16 L112 8 Z"/></svg>
-        </div>
         <div class="piles">
           <div class="pile pile-draw">
             <button id="drawPile" class="draw-pile" type="button" aria-label="Draw a card">

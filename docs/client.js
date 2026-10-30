@@ -5,7 +5,7 @@
   const $ = id => document.getElementById(id);
   const COLORS = ['red', 'yellow', 'green', 'blue'];
   const COLOR_LABELS = { red: 'RED', yellow: 'YELLOW', green: 'GREEN', blue: 'BLUE' };
-  const COLOR_HEX = { red: '#f3293f', yellow: '#ffd92f', green: '#22aa66', blue: '#147bd1' };
+  const COLOR_HEX = { red: '#ee3a2c', yellow: '#f2b705', green: '#25a85a', blue: '#2379d6' };
   const LETTERS = { red: 'R', yellow: 'Y', green: 'G', blue: 'B' };
   const DEFAULT_PREFS = { musicEnabled: true, musicVolume: 25, sfxEnabled: true, sfxVolume: 65, reduceMotion: false };
   const STORAGE_KEY = 'myweb-uno-v2-preferences';
@@ -280,7 +280,7 @@
     const oppH = clampNum(44, handH * 0.46, 100);
     const oppW = Math.round(oppH * 0.649);
     const av = clampNum(34, oppH * 0.78, 72);
-    const ring = Math.max(pileH * 1.95, Math.min(pileH * 2.2, W * 0.8, H * 0.5));
+    const ring = Math.max(pileH * 1.95, Math.min(pileH * 2.3, W * 0.5, H * 0.55));
     const set = (k, v) => field.style.setProperty(k, `${Math.round(v)}px`);
     set('--hand-h', handH); set('--hand-w', handW); set('--pile-h', pileH); set('--pile-w', pileW);
     set('--opp-h', oppH); set('--opp-w', oppW); set('--av', av); set('--ring', ring);
@@ -317,7 +317,7 @@
     $('globalLiveRegion').textContent = text;
   }
 
-  function flyCard({ card, back = false, from, to, rotFrom = 0, rotTo = 0, duration = 440, delay = 0 }) {
+  function flyCard({ card, back = false, from, to, rotFrom = 0, rotTo = 0, duration = 440, delay = 0, tilt = 0 }) {
     if (prefs.reduceMotion) return 0;
     const el = back ? makeCardBack() : createCardElement(card);
     el.classList.add('flying-card');
@@ -326,9 +326,9 @@
     $('cardFlightLayer').appendChild(el);
     const dx = to.x - from.x, dy = to.y - from.y, s = to.w / from.w;
     el.animate([
-      { transform: `translate(0px, 0px) rotate(${rotFrom}deg) scale(1)` },
-      { transform: `translate(${dx * .5}px, ${dy * .5 - 22}px) rotate(${(rotFrom + rotTo) / 2}deg) scale(${((1 + s) / 2) * 1.04})`, offset: .55 },
-      { transform: `translate(${dx}px, ${dy}px) rotate(${rotTo}deg) scale(${s})` },
+      { transform: `perspective(1100px) translate(0px, 0px) rotate(${rotFrom}deg) scale(1) rotateX(0deg)` },
+      { transform: `perspective(1100px) translate(${dx * .5}px, ${dy * .5 - 40}px) rotate(${(rotFrom + rotTo) / 2}deg) scale(${((1 + s) / 2) * 1.08}) rotateX(${tilt * .4}deg)`, offset: .55 },
+      { transform: `perspective(1100px) translate(${dx}px, ${dy}px) rotate(${rotTo}deg) scale(${s}) rotateX(${tilt}deg)` },
     ], { duration, delay, easing: 'cubic-bezier(.22,.8,.25,1)', fill: 'both' }).onfinish = () => el.remove();
     return duration + delay;
   }
@@ -421,12 +421,12 @@
   function fillSeatHand(handEl, count, seatClass) {
     const { oppW, oppH } = layout;
     const shown = Math.min(count, 10);
-    const step = Math.min(oppW * 0.4, 22);
+    const step = Math.min(oppW * 0.52, 28);
     const span = Math.max(0, (shown - 1) * step);
-    const angStep = Math.min(5, 34 / Math.max(shown, 1));
+    const angStep = Math.min(6, 44 / Math.max(shown, 1));
     const sideways = seatClass === 'seat-left' || seatClass === 'seat-right';
-    handEl.style.width = `${sideways ? oppH + 12 : span + oppW + 10}px`;
-    handEl.style.height = `${sideways ? span + oppW + 10 : oppH + 12}px`;
+    handEl.style.width = `${sideways ? oppH + 14 : span + oppW + 14}px`;
+    handEl.style.height = `${sideways ? span + oppW + 14 : oppH + 14}px`;
     handEl.replaceChildren();
     for (let i = 0; i < shown; i += 1) {
       const off = i - (shown - 1) / 2;
@@ -585,7 +585,7 @@
           x += Math.sign(d) * spread * (falloff[Math.min(Math.abs(d), 5)] || 0);
         }
       }
-      el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) rotate(${angle.toFixed(2)}deg) scale(${scale})`;
+      el.style.transform = `perspective(1100px) translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) rotate(${angle.toFixed(2)}deg) rotateX(${i === hoverIndex ? 0 : 12}deg) scale(${scale})`;
       el.style.zIndex = String(i === hoverIndex ? 1000 : i + 1);
       el.classList.toggle('is-hovered', i === hoverIndex);
       el.dataset.slot = String(i);
@@ -609,7 +609,7 @@
         flightThisRender = Math.max(flightThisRender, flyCard({
           card: game.top && game.top.id === game.lastCardId ? game.top : { id: game.lastCardId, color: 'wild', value: 'Wild' },
           from: { ...centerOf(rect), w: layout.handW, h: layout.handH }, to: pileTarget(),
-          rotTo: discardRot(game.lastCardId), duration: 420,
+          rotTo: Math.round(discardRot(game.lastCardId) * 1.7), duration: 420, tilt: 36,
         }));
       }
       lastAnimatedCardId = game.lastCardId;
@@ -717,7 +717,7 @@
         const rect = miniCard.getBoundingClientRect();
         flightThisRender = Math.max(flightThisRender, flyCard({
           card: game.top, from: { ...centerOf(rect), w: layout.oppW, h: layout.oppH }, to: pileTarget(),
-          rotFrom: 180, rotTo: discardRot(game.lastCardId) + 360, duration: 480,
+          rotFrom: 180, rotTo: Math.round(discardRot(game.lastCardId) * 1.7) + 360, duration: 480, tilt: 36,
         }));
       }
     }
@@ -758,8 +758,8 @@
     let isNewTop = false;
     if (top && top.id !== lastTopId) {
       const seed = hashId(top.id);
-      discardStack.push({ card: top, rot: discardRot(top.id), dx: ((seed >> 5) % 13) - 6, dy: ((seed >> 9) % 11) - 5 });
-      if (discardStack.length > 5) discardStack.shift();
+      discardStack.push({ card: top, rot: Math.round(discardRot(top.id) * 1.7), dx: ((seed >> 5) % 25) - 12, dy: ((seed >> 9) % 17) - 8 });
+      if (discardStack.length > 7) discardStack.shift();
       lastTopId = top.id;
       isNewTop = true;
     }
