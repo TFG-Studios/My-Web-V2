@@ -26,6 +26,19 @@
   let musicStep = 0;
   let audioContext = null;
   let lastGameSnapshot = null;
+  let layout = null;
+  let hoverIndex = -1;
+  let armedId = null;
+  let handView = { cards: [], els: [] };
+  let discardStack = [];
+  let discardRound = null;
+  let lastTopId = null;
+  let prevCounts = new Map();
+  let flightThisRender = 0;
+  let statusOverrideUntil = 0;
+  let flashTimer = null;
+  let leaveTimer = null;
+  let lastPointerType = 'mouse';
   let prefs = loadPrefs();
 
   function makeToken() {
@@ -55,6 +68,7 @@
   function closeModal(id) { $(id)?.classList.add('is-hidden'); }
   function hideAllModals() {
     ['roomSetupModal', 'settingsModal', 'howToPlayModal', 'wildPicker'].forEach(closeModal);
+    pendingWildCardId = null;
   }
 
   function toast(text, kind = 'info') {
@@ -170,31 +184,29 @@
     return `${card.color || 'Wild'} ${card.value}`;
   }
   function createCardElement(card, options = {}) {
-    const button = document.createElement(options.interactive ? 'button' : 'div');
-    button.className = `playing-card card-${card.color}${options.small ? ' card-small' : ''}${options.compact ? ' card-compact' : ''}`;
-    button.dataset.cardId = card.id || '';
-    button.setAttribute('aria-label', cardLabel(card));
+    const el = document.createElement(options.interactive ? 'button' : 'div');
+    el.className = `playing-card card-${card.color}`;
+    el.dataset.cardId = card.id || '';
+    el.setAttribute('aria-label', cardLabel(card));
     if (options.interactive) {
-      button.type = 'button';
-      button.title = cardLabel(card);
-      button.addEventListener('click', () => onCardChosen(card, button));
+      el.type = 'button';
+      // Mouse/touch are handled by the hand container (see hitTestHand); this only serves keyboard activation.
+      el.addEventListener('click', event => { if (event.detail === 0) onCardChosen(card, el); });
     }
     const filename = cardFile(card);
     if (filename) {
       const image = document.createElement('img');
       image.className = 'card-face-image';
       image.src = `/cards/${filename}`;
-      image.alt = cardLabel(card);
+      image.alt = '';
       image.draggable = false;
       image.addEventListener('error', () => {
         image.remove();
-        if (!button.querySelector('.card-face-fallback')) {
-          button.appendChild(makeFallbackFace(card));
-        }
+        if (!el.querySelector('.card-face-fallback')) el.appendChild(makeFallbackFace(card));
       }, { once: true });
-      button.appendChild(image);
-    } else button.appendChild(makeFallbackFace(card));
-    return button;
+      el.appendChild(image);
+    } else el.appendChild(makeFallbackFace(card));
+    return el;
   }
   function makeFallbackFace(card) {
     const face = document.createElement('span');
@@ -250,56 +262,115 @@
     return card.color === game.color || card.value === top?.value;
   }
 
-  function animateCardToDiscard(element) {
-    const target = $('discardPile');
-    if (!element || !target || prefs.reduceMotion || !element.isConnected) return;
-    const from = element.getBoundingClientRect();
-    const to = target.getBoundingClientRect();
-    const clone = element.cloneNode(true);
-    clone.classList.add('flying-card');
-    clone.style.left = `${from.left}px`;
-    clone.style.top = `${from.top}px`;
-    clone.style.width = `${from.width}px`;
-    clone.style.height = `${from.height}px`;
-    $('cardFlightLayer').appendChild(clone);
-    const dx = to.left + to.width / 2 - (from.left + from.width / 2);
-    const dy = to.top + to.height / 2 - (from.top + from.height / 2);
-    clone.animate([
-      { transform: 'translate(0, 0) rotate(0deg) skew(0deg, 0deg) scale(1)', opacity: 1 },
-      { transform: `translate(${dx * .28}px, ${dy * .28 - 35}px) rotate(-12deg) skew(-4deg, 0deg) scale(1.08)`, opacity: 1, offset: .28 },
-      { transform: `translate(${dx}px, ${dy}px) rotate(16deg) skew(2deg, 0deg) scale(.82)`, opacity: .15 },
-    ], { duration: 470, easing: 'cubic-bezier(.2,.85,.24,1)', fill: 'forwards' }).onfinish = () => clone.remove();
+  /* ------------------------------------------------------------------
+     Field layout — card/avatar sizes are derived from the viewport and
+     published as CSS custom properties on #field (see game.css).
+  ------------------------------------------------------------------- */
+  const clampNum = (min, value, max) => Math.max(min, Math.min(max, value));
+  function layoutField() {
+    const field = $('field');
+    if (!field) return;
+    const W = field.clientWidth, H = field.clientHeight;
+    if (!W || !H) return;
+    const portrait = H > W * 1.05;
+    const handH = clampNum(84, portrait ? Math.min(W * 0.29, H * 0.16) : Math.min(H * 0.225, W * 0.13), 210);
+    const handW = Math.round(handH * 0.649);
+    const pileH = clampNum(78, portrait ? Math.min(W * 0.28, H * 0.15) : Math.min(H * 0.215, W * 0.12), 200);
+    const pileW = Math.round(pileH * 0.649);
+    const oppH = clampNum(44, handH * 0.46, 100);
+    const oppW = Math.round(oppH * 0.649);
+    const av = clampNum(34, oppH * 0.78, 72);
+    const ring = Math.max(pileH * 1.95, Math.min(pileH * 2.2, W * 0.8, H * 0.5));
+    const set = (k, v) => field.style.setProperty(k, `${Math.round(v)}px`);
+    set('--hand-h', handH); set('--hand-w', handW); set('--pile-h', pileH); set('--pile-w', pileW);
+    set('--opp-h', oppH); set('--opp-w', oppW); set('--av', av); set('--ring', ring);
+    field.classList.toggle('is-portrait', portrait);
+    layout = { W, H, handH, handW, pileH, pileW, oppH, oppW, av, portrait };
+  }
+  function relayout() {
+    if (!state?.started || !state.game) return;
+    layoutField();
+    renderOpponents(state);
+    applyHandTransforms();
   }
 
+  /* ------------------------------------------------------------------
+     Small helpers: in-place status line (replaces stacked toasts),
+     flying cards, deterministic pile rotation.
+  ------------------------------------------------------------------- */
+  function hashId(id) {
+    let h = 2166136261;
+    for (const ch of String(id)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); }
+    return h >>> 0;
+  }
+  const discardRot = id => (hashId(id) % 29) - 14;
+  const centerOf = rect => ({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+
+  function flash(text, ms = 1700) {
+    const el = $('tableMessage');
+    if (!el || !text) return;
+    statusOverrideUntil = Date.now() + ms;
+    el.textContent = text;
+    el.className = 'status-line is-flash';
+    clearTimeout(flashTimer);
+    flashTimer = window.setTimeout(() => { statusOverrideUntil = 0; if (state?.game) renderStatus(state); }, ms);
+    $('globalLiveRegion').textContent = text;
+  }
+
+  function flyCard({ card, back = false, from, to, rotFrom = 0, rotTo = 0, duration = 440, delay = 0 }) {
+    if (prefs.reduceMotion) return 0;
+    const el = back ? makeCardBack() : createCardElement(card);
+    el.classList.add('flying-card');
+    el.style.width = `${from.w}px`; el.style.height = `${from.h}px`;
+    el.style.left = `${from.x - from.w / 2}px`; el.style.top = `${from.y - from.h / 2}px`;
+    $('cardFlightLayer').appendChild(el);
+    const dx = to.x - from.x, dy = to.y - from.y, s = to.w / from.w;
+    el.animate([
+      { transform: `translate(0px, 0px) rotate(${rotFrom}deg) scale(1)` },
+      { transform: `translate(${dx * .5}px, ${dy * .5 - 22}px) rotate(${(rotFrom + rotTo) / 2}deg) scale(${((1 + s) / 2) * 1.04})`, offset: .55 },
+      { transform: `translate(${dx}px, ${dy}px) rotate(${rotTo}deg) scale(${s})` },
+    ], { duration, delay, easing: 'cubic-bezier(.22,.8,.25,1)', fill: 'both' }).onfinish = () => el.remove();
+    return duration + delay;
+  }
+  const pileTarget = () => {
+    const rect = $('discardPile').getBoundingClientRect();
+    return { ...centerOf(rect), w: rect.width, h: rect.height };
+  };
+  const drawPileSource = () => {
+    const rect = $('drawPile').getBoundingClientRect();
+    return { ...centerOf(rect), w: rect.width, h: rect.height };
+  };
+
+  /* ------------------------------------------------------------------
+     Choosing a card
+  ------------------------------------------------------------------- */
   function onCardChosen(card, element) {
     if (!state?.game || state.game.winnerId) return;
     const me = state.players.find(player => player.id === socket.id);
-    if (!me?.isTurn) return toast('Wait for your turn.', 'warning');
+    if (!me?.isTurn) { rejectCard(element); return flash('Wait for your turn'); }
     if (!localCanPlay(card, state.game, state.game.hand || [])) {
-      if (element && !prefs.reduceMotion) {
-        element.classList.remove('card-rejected');
-        void element.offsetWidth;
-        element.classList.add('card-rejected');
-        window.setTimeout(() => element.classList.remove('card-rejected'), 420);
-      }
-      playSfx('error');
-      return toast('That card cannot be played right now.', 'warning');
+      rejectCard(element);
+      return;
     }
+    hoverIndex = -1; armedId = null;
     if (card.color === 'wild') {
       pendingWildCardId = card.id;
       $('wildPicker').classList.remove('is-hidden');
       playSfx('click');
+      applyHandTransforms();
       return;
     }
-    if (element) {
-      element.classList.add('card-selected');
-      element.animate([
-        { transform: 'translateY(-10px) rotate(-1deg) skew(-1deg, 0deg) scale(1.03)' },
-        { transform: 'translateY(-4px) rotate(1.2deg) skew(1deg, 0deg) scale(1.02)' },
-      ], { duration: 130, easing: 'ease-out' });
-    }
-    playSfx(card.value === 'Draw2' || card.value === 'Wild4' || card.value === 'Skip' || card.value === 'Reverse' ? 'action' : 'card');
+    playSfx(['Draw2', 'Wild4', 'Skip', 'Reverse'].includes(card.value) ? 'action' : 'card');
     socket.emit('playCard', { cardId: card.id });
+  }
+  function rejectCard(element) {
+    if (element && !prefs.reduceMotion) {
+      element.classList.remove('card-rejected');
+      void element.offsetWidth;
+      element.classList.add('card-rejected');
+      window.setTimeout(() => element.classList.remove('card-rejected'), 380);
+    }
+    playSfx('error');
   }
 
   function renderLobby(next) {
@@ -343,55 +414,85 @@
     }
   }
 
+  /* ------------------------------------------------------------------
+     Opponents — face-down fans arranged around the table edge.
+     Seats run clockwise from you, so turn order reads naturally.
+  ------------------------------------------------------------------- */
+  function fillSeatHand(handEl, count, seatClass) {
+    const { oppW, oppH } = layout;
+    const shown = Math.min(count, 10);
+    const step = Math.min(oppW * 0.4, 22);
+    const span = Math.max(0, (shown - 1) * step);
+    const angStep = Math.min(5, 34 / Math.max(shown, 1));
+    const sideways = seatClass === 'seat-left' || seatClass === 'seat-right';
+    handEl.style.width = `${sideways ? oppH + 12 : span + oppW + 10}px`;
+    handEl.style.height = `${sideways ? span + oppW + 10 : oppH + 12}px`;
+    handEl.replaceChildren();
+    for (let i = 0; i < shown; i += 1) {
+      const off = i - (shown - 1) / 2;
+      const arc = off * off * 0.9;
+      const back = makeCardBack();
+      back.classList.add('mini-card');
+      let transform;
+      if (seatClass === 'seat-left') transform = `translate(${-arc}px, ${off * step}px) rotate(${90 + off * angStep}deg)`;
+      else if (seatClass === 'seat-right') transform = `translate(${arc}px, ${off * step}px) rotate(${-90 + off * angStep}deg)`;
+      else transform = `translate(${off * step}px, ${arc}px) rotate(${180 + off * angStep}deg)`;
+      back.style.transform = transform;
+      back.style.zIndex = String(i);
+      handEl.appendChild(back);
+    }
+  }
+
   function renderOpponents(next) {
     const game = next.game;
     const meIndex = next.players.findIndex(player => player.id === socket.id);
-    const others = next.players.filter(player => player.id !== socket.id);
-    const n = others.length;
+    const total = next.players.length;
+    const others = next.players
+      .map((player, index) => ({ player, order: (index - meIndex + total) % total }))
+      .filter(entry => entry.player.id !== socket.id)
+      .sort((a, b) => a.order - b.order)
+      .map(entry => entry.player);
     const seatMaps = {
       1: ['seat-top'],
       2: ['seat-top-left', 'seat-top-right'],
       3: ['seat-left', 'seat-top', 'seat-right'],
       4: ['seat-left', 'seat-top-left', 'seat-top-right', 'seat-right'],
     };
-    const seats = seatMaps[n] || seatMaps[4];
-    $('opponents').replaceChildren();
+    const seats = seatMaps[others.length] || seatMaps[4];
+    const container = $('opponents');
+    container.replaceChildren();
+    const challenge = game?.unoChallenge && Date.now() <= game.unoChallenge.deadline ? game.unoChallenge : null;
     others.forEach((player, index) => {
+      const seatClass = seats[index] || 'seat-top';
       const seat = document.createElement('div');
-      seat.className = `opponent-seat ${seats[index] || 'seat-top'}${player.isTurn ? ' opponent-active' : ''}${!player.connected ? ' opponent-offline' : ''}`;
+      seat.className = `seat ${seatClass}${player.isTurn && !game.winnerId ? ' opp-active' : ''}${!player.connected ? ' opp-offline' : ''}`;
       seat.dataset.playerId = player.id;
-      const badge = document.createElement('button');
-      badge.className = 'opponent-badge';
-      badge.type = 'button';
-      badge.disabled = true;
+      const hand = document.createElement('div');
+      hand.className = 'seat-hand';
+      fillSeatHand(hand, player.count, seatClass);
+      const id = document.createElement('div');
+      id.className = 'seat-id';
       const avatar = document.createElement('span');
-      avatar.className = 'avatar avatar-opponent';
+      avatar.className = 'seat-avatar';
       avatar.textContent = player.name.slice(0, 1).toUpperCase();
-      const label = document.createElement('span');
-      label.className = 'opponent-name';
-      label.textContent = player.name;
-      const count = document.createElement('span');
-      count.className = 'opponent-count';
+      const count = document.createElement('i');
+      count.className = 'seat-count';
       count.textContent = String(player.count);
-      const stack = document.createElement('span');
-      stack.className = 'opponent-mini-hand';
-      const visibleCards = Math.min(player.count, 7);
-      for (let i = 0; i < visibleCards; i += 1) {
-        const mini = document.createElement('span');
-        const center = (visibleCards - 1) / 2;
-        const angle = (i - center) * Math.min(5, 22 / Math.max(visibleCards, 1));
-        mini.style.setProperty('--mini-index', i);
-        mini.style.setProperty('--mini-angle', `${angle}deg`);
-        mini.style.setProperty('--mini-yaw', `${(i - center) * 2.2}deg`);
-        stack.appendChild(mini);
+      avatar.appendChild(count);
+      const name = document.createElement('span');
+      name.className = 'seat-name';
+      name.textContent = player.connected ? player.name : `${player.name} …`;
+      id.append(avatar, name);
+      if (challenge && challenge.targetId === player.id) {
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'catch-chip';
+        chip.textContent = 'CATCH!';
+        chip.addEventListener('click', () => { socket.emit('catchUno', player.id); playSfx('action'); chip.remove(); });
+        id.appendChild(chip);
       }
-      stack.setAttribute('aria-label', `${player.count} face-down cards`);
-      badge.append(avatar, label, count);
-      seat.append(badge, stack);
-      if (player.isTurn) {
-        const turn = document.createElement('span'); turn.className = 'opponent-turn-tag'; turn.textContent = 'PLAYING'; seat.appendChild(turn);
-      }
-      if (next.game?.awaitingSwapPlayerId === socket.id && game?.awaitingSwapPlayerId !== player.id) {
+      seat.append(id, hand);
+      if (game?.awaitingSwapPlayerId === socket.id) {
         seat.classList.add('swap-target');
         seat.tabIndex = 0;
         seat.setAttribute('role', 'button');
@@ -399,183 +500,306 @@
         seat.addEventListener('click', () => socket.emit('swapHands', player.id));
         seat.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') socket.emit('swapHands', player.id); });
       }
-      if (game?.unoChallenge?.targetId === player.id) seat.classList.add('missed-uno-target');
-      $('opponents').appendChild(seat);
+      container.appendChild(seat);
+    });
+    if (unoChallengeTicker) { clearTimeout(unoChallengeTicker); unoChallengeTicker = null; }
+    if (challenge) {
+      unoChallengeTicker = window.setTimeout(() => document.querySelectorAll('.catch-chip').forEach(chip => chip.remove()), Math.max(0, challenge.deadline - Date.now() + 15));
+    }
+  }
+
+  function seatBubble(playerId, text, kind = '') {
+    const seat = document.querySelector(`.seat[data-player-id="${CSS.escape(playerId)}"] .seat-id`);
+    if (!seat) return;
+    const bubble = document.createElement('span');
+    bubble.className = `seat-bubble ${kind}`;
+    bubble.textContent = text;
+    seat.appendChild(bubble);
+    window.setTimeout(() => bubble.remove(), 1600);
+  }
+
+  /* ------------------------------------------------------------------
+     Your hand.
+     Hover is resolved from the pointer's X position against the *layout*
+     (never against transformed card boxes), so lifting/spreading a card can
+     never change which card is under the cursor. That is what removes the
+     flicker and the "neighbour steals the hover" problem near the middle.
+  ------------------------------------------------------------------- */
+  const COLOR_ORDER = { red: 0, yellow: 1, green: 2, blue: 3, wild: 4 };
+  const VALUE_ORDER = { Skip: 10, Reverse: 11, Draw2: 12, Wild: 20, Wild4: 21 };
+  function sortHand(hand) {
+    const rank = card => (COLOR_ORDER[card.color] ?? 5) * 100 + (VALUE_ORDER[card.value] ?? (Number(card.value) || 0));
+    return [...hand].sort((a, b) => rank(a) - rank(b) || String(a.id).localeCompare(String(b.id)));
+  }
+
+  function handMetrics(count) {
+    const { W, handW, portrait } = layout;
+    const avail = portrait ? W * 0.94 : Math.min(W * 0.64, 1120);
+    const step = count > 1 ? Math.min(handW * 0.62, (avail - handW) / (count - 1)) : 0;
+    const total = step * Math.max(0, count - 1) + handW;
+    return { step, total, left: -total / 2 };
+  }
+
+  function hitTestHand(event) {
+    const count = handView.cards.length;
+    if (!count || !layout) return -1;
+    const rect = $('myHand').getBoundingClientRect();
+    const { handH } = layout;
+    const baseTop = rect.bottom - handH * 1.1;
+    if (event.clientY < baseTop - handH * 0.3 * 0.75 || event.clientY > rect.bottom) return -1;
+    const { step, total, left } = handMetrics(count);
+    const relX = event.clientX - (rect.left + rect.width / 2);
+    if (relX < left || relX > left + total) return -1;
+    if (step <= 0) return 0;
+    return clampNum(0, Math.floor((relX - left) / step), count - 1);
+  }
+
+  function setHover(index) {
+    if (index === hoverIndex) return;
+    hoverIndex = index;
+    applyHandTransforms();
+  }
+
+  function applyHandTransforms() {
+    const els = handView.els;
+    const count = els.length;
+    if (!count || !layout) return;
+    const { handW, handH } = layout;
+    const { step } = handMetrics(count);
+    const lift = handH * 0.3;
+    const arcK = count > 8 ? 0.55 : 0.9;
+    const angStep = Math.min(3, 30 / Math.max(count, 1));
+    const spread = clampNum(handW * 0.15, handW * 0.9 - step, handW * 0.42);
+    const falloff = [0, 1, 0.6, 0.3, 0.12, 0.05];
+    els.forEach((el, i) => {
+      const off = i - (count - 1) / 2;
+      let x = off * step;
+      let y = Math.pow(Math.abs(off), 1.6) * arcK;
+      let angle = off * angStep;
+      let scale = 1;
+      if (el._playable) y -= handH * 0.06;
+      if (hoverIndex >= 0) {
+        if (i === hoverIndex) { y = -lift; angle = 0; scale = 1.14; }
+        else {
+          const d = i - hoverIndex;
+          x += Math.sign(d) * spread * (falloff[Math.min(Math.abs(d), 5)] || 0);
+        }
+      }
+      el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) rotate(${angle.toFixed(2)}deg) scale(${scale})`;
+      el.style.zIndex = String(i === hoverIndex ? 1000 : i + 1);
+      el.classList.toggle('is-hovered', i === hoverIndex);
+      el.dataset.slot = String(i);
     });
   }
 
   function renderHand(next) {
     const game = next.game;
-    const hand = game.hand || [];
+    const hand = sortHand(game.hand || []);
     const container = $('myHand');
     const me = next.players.find(player => player.id === socket.id);
+    const isMyTurn = Boolean(me?.isTurn && !game.winnerId);
     const oldElements = new Map([...container.querySelectorAll('[data-card-id]')].map(el => [el.dataset.cardId, el]));
     const newIds = new Set(hand.map(card => card.id));
-    if (game.lastCardId && game.lastCardId !== lastAnimatedCardId && !newIds.has(game.lastCardId)) {
-      const oldPlayed = oldElements.get(game.lastCardId);
-      if (oldPlayed) animateCardToDiscard(oldPlayed);
+
+    // Card I just played: fly it from the hand to the discard pile.
+    if (game.lastCardId && game.lastCardId !== lastAnimatedCardId && game.lastPlayerId === socket.id && !newIds.has(game.lastCardId)) {
+      const played = oldElements.get(game.lastCardId);
+      if (played && layout) {
+        const rect = played.getBoundingClientRect();
+        flightThisRender = Math.max(flightThisRender, flyCard({
+          card: game.top && game.top.id === game.lastCardId ? game.top : { id: game.lastCardId, color: 'wild', value: 'Wild' },
+          from: { ...centerOf(rect), w: layout.handW, h: layout.handH }, to: pileTarget(),
+          rotTo: discardRot(game.lastCardId), duration: 420,
+        }));
+      }
       lastAnimatedCardId = game.lastCardId;
     }
-    for (const [id, element] of oldElements) {
-      if (!newIds.has(id)) element.remove();
-    }
-    const isMyTurn = Boolean(me?.isTurn && !game.winnerId);
-    const playableCount = hand.filter(card => localCanPlay(card, game, hand)).length;
-    const handWidth = Math.max(240, container.clientWidth || window.innerWidth);
-    const handHeight = Math.max(88, container.clientHeight || 150);
-    const heightAllowance = handWidth < 740 ? 14 : 23;
-    const maxCardHeight = Math.min(154, Math.max(70, handHeight - heightAllowance));
-    const cardHeight = Math.min(maxCardHeight, handWidth < 430 ? 113 : handWidth < 760 ? 132 : 154);
-    const cardWidth = Math.round(cardHeight * 0.667);
-    const step = hand.length > 1
-      ? Math.min(cardWidth * 0.59, Math.max(10, (handWidth - cardWidth - 8) / (hand.length - 1)))
-      : cardWidth;
-    const overlap = Math.max(0, cardWidth - step);
-    const angleStep = Math.min(2.5, 26 / Math.max(hand.length, 1));
+    for (const [id, element] of oldElements) if (!newIds.has(id)) element.remove();
+
+    const els = [];
+    const fresh = [];
     hand.forEach((card, index) => {
       let element = oldElements.get(card.id);
-      const isNew = !element;
       if (!element) {
         element = createCardElement(card, { interactive: true });
-        element.classList.add('card-entering');
-        element.style.animationDelay = `${Math.min(index * 22, 250)}ms`;
-        window.setTimeout(() => {
-          element.classList.remove('card-entering');
-          element.style.animationDelay = '';
-        }, 700);
+        element.tabIndex = -1;
+        container.appendChild(element);
+        fresh.push({ element, index });
       }
       const playable = isMyTurn && localCanPlay(card, game, hand);
-      element.classList.toggle('is-playable', playable);
+      element._playable = playable;
       element.classList.toggle('is-unplayable', isMyTurn && !playable);
-      element.classList.toggle('card-drawn', game.drawnPlayableCardId === card.id);
-      element.style.setProperty('--hand-index', index);
-      element.style.setProperty('--hand-count', hand.length);
-      element.style.setProperty('--card-width', `${cardWidth}px`);
-      element.style.setProperty('--card-height', `${cardHeight}px`);
-      element.style.setProperty('--card-overlap', `${overlap}px`);
-      const centerOffset = index - (hand.length - 1) / 2;
-      const fanAngle = centerOffset * angleStep;
-      const fanY = Math.abs(centerOffset) * Math.min(2.4, hand.length > 7 ? 1.1 : 1.7);
-      const fanYaw = centerOffset * Math.min(1.8, 14 / Math.max(hand.length, 1));
-      element.style.setProperty('--hand-angle', `${fanAngle}deg`);
-      element.style.setProperty('--fan-y', `${fanY}px`);
-      element.style.setProperty('--hand-yaw', `${fanYaw}deg`);
-      element.style.zIndex = String(index + 1);
-      element.disabled = !isMyTurn;
-      element.setAttribute('aria-disabled', String(!isMyTurn));
-      if (isNew) element.dataset.newlyDealt = 'true';
-      else delete element.dataset.newlyDealt;
-      container.appendChild(element);
+      els.push(element);
     });
+    handView = { cards: hand, els };
+    if (hoverIndex >= hand.length) hoverIndex = hand.length - 1;
+    if (!isMyTurn && armedId) armedId = null;
+    applyHandTransforms();
+
+    // New cards slide in from the draw pile.
+    if (fresh.length && !prefs.reduceMotion && layout) {
+      const source = drawPileSource();
+      fresh.forEach(({ element, index }, order) => {
+        const rect = element.getBoundingClientRect();
+        const c = centerOf(rect);
+        const finalTransform = element.style.transform;
+        element.animate([
+          { transform: `translate(${source.x - c.x}px, ${source.y - c.y}px) rotate(-14deg) scale(${source.w / rect.width})`, opacity: .4 },
+          { transform: finalTransform, opacity: 1 },
+        ], { duration: 420, delay: Math.min(order * 70, 420), easing: 'cubic-bezier(.2,.85,.25,1)', fill: 'backwards' });
+      });
+    }
+
     $('myHandCount').textContent = `${hand.length} ${hand.length === 1 ? 'CARD' : 'CARDS'}`;
     $('myAvatar').textContent = (me?.name || 'Y').slice(0, 1).toUpperCase();
     $('myNameLabel').textContent = (me?.name || 'YOU').toUpperCase();
-    $('myTurnChip').classList.toggle('is-hidden', !isMyTurn);
-    $('handHint').textContent = game.winnerId ? 'Round complete' : isMyTurn ? (game.drawnPlayableCardId ? 'You drew a playable card · play it or pass' : playableCount ? 'Your turn · choose a glowing card' : 'No playable card · draw from the pile') : 'Waiting for your turn…';
-    $('handSortLabel').textContent = isMyTurn && playableCount ? `${playableCount} PLAYABLE` : 'PLAYABLE CARDS GLOW';
+    $('youSeat').classList.toggle('is-turn', isMyTurn);
+
+    const playableCount = hand.filter(card => localCanPlay(card, game, hand)).length;
     const canCallUno = isMyTurn && hand.length === 2 && playableCount > 0 && game.pendingDraw === 0 && !game.pendingWild4 && !game.drawnPlayableCardId;
-    $('unoButton').classList.toggle('is-hidden', !canCallUno && !game.armedUno);
-    $('unoButton').disabled = !canCallUno || Boolean(game.armedUno);
-    $('unoButton').classList.toggle('uno-ready', canCallUno && !game.armedUno);
-    $('unoButton').classList.toggle('uno-called', Boolean(game.armedUno));
-    $('passTurn').classList.toggle('is-hidden', !(isMyTurn && game.drawnPlayableCardId));
+    const uno = $('unoButton');
+    uno.disabled = !canCallUno || Boolean(game.armedUno);
+    uno.classList.toggle('uno-ready', canCallUno && !game.armedUno);
+    uno.classList.toggle('uno-called', Boolean(game.armedUno));
+
     const drawButton = $('drawPile');
     drawButton.disabled = !isMyTurn || Boolean(game.winnerId) || Boolean(game.awaitingSwapPlayerId) || Boolean(game.sixReaction?.active) || Boolean(game.drawnPlayableCardId);
-    drawButton.classList.toggle('draw-ready', isMyTurn && !playableCount && !game.pendingWild4 && !game.drawnPlayableCardId);
+    drawButton.classList.toggle('draw-ready', isMyTurn && !playableCount && !game.pendingWild4 && !game.drawnPlayableCardId && !game.pendingDraw);
     drawButton.classList.toggle('draw-penalty', isMyTurn && game.pendingDraw > 0);
-    $('penaltyBanner').classList.toggle('is-hidden', !(isMyTurn && game.pendingDraw > 0 && !game.pendingWild4));
-    if (game.pendingDraw > 0) {
-      $('penaltyText').textContent = `DRAW ${game.pendingDraw}`;
-      $('takePenalty').textContent = `Take ${game.pendingDraw}`;
-    }
-    $('wildFourBanner').classList.toggle('is-hidden', !(isMyTurn && game.pendingWild4?.targetId === socket.id));
-    $('challengeWildFour').disabled = !(isMyTurn && game.pendingWild4?.targetId === socket.id);
-    const canCatchUno = Boolean(game.unoChallenge && game.unoChallenge.targetId !== socket.id && Date.now() <= game.unoChallenge.deadline);
-    $('unoCatchBanner').classList.toggle('is-hidden', !canCatchUno);
-    if (unoChallengeTicker) { clearTimeout(unoChallengeTicker); unoChallengeTicker = null; }
-    if (canCatchUno) {
-      $('unoCatchText').textContent = `${game.unoChallenge.targetName} has one card. Catch them!`;
-      unoChallengeTicker = window.setTimeout(() => {
-        if (state?.game?.unoChallenge?.targetId === game.unoChallenge.targetId) $('unoCatchBanner').classList.add('is-hidden');
-      }, Math.max(0, game.unoChallenge.deadline - Date.now() + 15));
-    }
-    $('swapBanner').classList.toggle('is-hidden', game.awaitingSwapPlayerId !== socket.id);
-    if (game.awaitingSwapPlayerId === socket.id) $('handHint').textContent = 'Choose an opponent above to swap hands.';
+    const badge = $('drawBadge');
+    badge.classList.toggle('is-hidden', !(game.pendingDraw > 0));
+    if (game.pendingDraw > 0) badge.textContent = `+${game.pendingDraw}`;
+
+    // Contextual pills — only present while they are actionable.
+    const wildTarget = Boolean(isMyTurn && game.pendingWild4?.targetId === socket.id);
+    $('passTurn').classList.toggle('is-hidden', !(isMyTurn && game.drawnPlayableCardId));
+    $('takePenalty').classList.toggle('is-hidden', !(isMyTurn && game.pendingDraw > 0 && !game.pendingWild4));
+    $('takePenalty').textContent = `Take ${game.pendingDraw}`;
+    $('challengeWildFour').classList.toggle('is-hidden', !wildTarget);
+    $('acceptWildFour').classList.toggle('is-hidden', !wildTarget);
   }
 
-  function animateOpponentCardToDiscard(playerId, card) {
-    const seat = document.querySelector(`.opponent-seat[data-player-id="${CSS.escape(playerId)}"] .opponent-mini-hand span:last-child`);
-    const target = $('discardPile');
-    if (!seat || !target || !card || prefs.reduceMotion) return;
-    const from = seat.getBoundingClientRect();
-    const to = target.getBoundingClientRect();
-    const flying = createCardElement(card, { small: true });
-    flying.classList.add('flying-card', 'remote-flying-card');
-    flying.style.left = `${from.left}px`;
-    flying.style.top = `${from.top}px`;
-    flying.style.width = `${Math.max(14, from.width)}px`;
-    flying.style.height = `${Math.max(20, from.height)}px`;
-    flying.style.borderWidth = '1px';
-    $('cardFlightLayer').appendChild(flying);
-    const dx = to.left + to.width / 2 - (from.left + from.width / 2);
-    const dy = to.top + to.height / 2 - (from.top + from.height / 2);
-    const scale = Math.min(7, Math.max(3.6, to.width / Math.max(from.width, 1)));
-    flying.animate([
-      { transform: 'translate(0,0) rotate(0deg) skew(0deg,0deg) scale(1)', opacity: .85 },
-      { transform: `translate(${dx * .34}px,${dy * .34 - 18}px) rotate(-18deg) skew(-5deg,0deg) scale(${Math.max(1.4,scale * .55)})`, opacity: 1, offset: .34 },
-      { transform: `translate(${dx}px,${dy}px) rotate(14deg) skew(2deg,0deg) scale(${scale})`, opacity: .2 },
-    ], { duration: 510, easing: 'cubic-bezier(.18,.82,.2,1)', fill: 'forwards' }).onfinish = () => flying.remove();
+  function renderStatus(next) {
+    if (Date.now() < statusOverrideUntil) return;
+    const game = next.game;
+    const el = $('tableMessage');
+    const me = next.players.find(player => player.id === socket.id);
+    const current = next.players[game.turn];
+    let text = '';
+    let mine = false;
+    if (game.winnerId) text = `${game.winnerName} wins!`;
+    else if (game.awaitingSwapPlayerId === socket.id) text = 'Pick a player to swap hands';
+    else if (game.pendingWild4?.targetId === socket.id) text = 'Challenge the +4 or draw 4';
+    else if (me?.isTurn && game.pendingDraw > 0) text = `Stack a +${game.pendingDraw === 2 ? 2 : 4} or take ${game.pendingDraw}`;
+    else if (me?.isTurn) { text = game.drawnPlayableCardId ? 'Play it or pass' : 'Your turn'; mine = true; }
+    else if (current) text = `${current.name}'s turn`;
+    el.textContent = text;
+    el.className = `status-line${mine ? ' is-mine' : ''}`;
   }
 
   function renderGame(next) {
     const game = next.game;
-    if (lastGameSnapshot && game.lastCardId && game.lastCardId !== lastGameSnapshot.lastCardId && game.lastPlayerId && game.lastPlayerId !== socket.id) {
-      animateOpponentCardToDiscard(game.lastPlayerId, game.top);
+    flightThisRender = 0;
+    layoutField();
+    if (discardRound !== game.roundId) {
+      discardRound = game.roundId;
+      discardStack = []; lastTopId = null; prevCounts = new Map(); lastAnimatedCardId = null;
+      hoverIndex = -1; armedId = null; handView = { cards: [], els: [] };
+      $('myHand').replaceChildren();
     }
+
+    // Opponent plays a card: fly it out of their fan (before seats are rebuilt).
+    const firstFrame = !lastGameSnapshot;
+    if (!firstFrame && game.lastCardId && game.lastCardId !== lastGameSnapshot.lastCardId && game.lastPlayerId && game.lastPlayerId !== socket.id && game.top) {
+      const miniCard = document.querySelector(`.seat[data-player-id="${CSS.escape(game.lastPlayerId)}"] .mini-card:last-child`)
+        || document.querySelector(`.seat[data-player-id="${CSS.escape(game.lastPlayerId)}"] .seat-avatar`);
+      if (miniCard && layout) {
+        const rect = miniCard.getBoundingClientRect();
+        flightThisRender = Math.max(flightThisRender, flyCard({
+          card: game.top, from: { ...centerOf(rect), w: layout.oppW, h: layout.oppH }, to: pileTarget(),
+          rotFrom: 180, rotTo: discardRot(game.lastCardId) + 360, duration: 480,
+        }));
+      }
+    }
+
     $('gameRoomCode').textContent = next.code;
     renderOpponents(next);
-    renderHand(next);
-    $('turnLabel').textContent = game.winnerId ? `${game.winnerName} wins!` : `${next.players[game.turn]?.name || 'Someone'}'s turn`;
-    $('turnLabel').classList.toggle('turn-label-active', next.players[game.turn]?.id === socket.id && !game.winnerId);
-    $('directionIndicator').textContent = game.direction === 1 ? '↻' : '↺';
-    $('directionIndicator').classList.toggle('direction-reverse', game.direction === -1);
-    $('deckCount').textContent = `${game.drawCount} ${game.drawCount === 1 ? 'card' : 'cards'}`;
-    const discardPile = $('discardPile');
-    discardPile.replaceChildren();
-    const top = game.top;
-    const isNewDiscard = Boolean(top && game.lastCardId && game.lastCardId !== lastDiscardVisualId);
-    if (top) {
-      const topCard = createCardElement(top, { small: true });
-      topCard.classList.add('discard-top-card');
-      if (!isNewDiscard || prefs.reduceMotion) topCard.style.animation = 'none';
-      if (top.color === 'wild') {
-        topCard.dataset.activeColor = game.color || 'red';
-        topCard.style.setProperty('--active-color', COLOR_HEX[game.color] || COLOR_HEX.red);
-      }
-      discardPile.appendChild(topCard);
-      if (isNewDiscard) lastDiscardVisualId = game.lastCardId;
-    }
-    const ring = document.querySelector('.direction-ring');
-    ring?.classList.toggle('direction-reverse', game.direction === -1);
-    const currentColor = game.color || 'red';
-    $('currentColorBadge').style.setProperty('--current-color', COLOR_HEX[currentColor] || COLOR_HEX.red);
-    $('currentColorBadge').querySelector('i').style.background = COLOR_HEX[currentColor] || COLOR_HEX.red;
-    $('currentColorBadge').querySelector('span').textContent = COLOR_LABELS[currentColor] || 'RED';
-    $('tableMessage').classList.toggle('is-active', Boolean(game.pendingDraw || game.pendingWild4 || game.unoChallenge || game.awaitingSwapPlayerId));
-    if (game.pendingWild4?.targetId === socket.id) $('tableMessage').textContent = 'Accept or challenge the Wild Draw Four.';
-    else if (game.pendingDraw > 0 && game.turn === next.players.findIndex(p => p.id === socket.id)) $('tableMessage').textContent = `${game.pendingDraw} cards are waiting. Stack or take the penalty.`;
-    else if (game.awaitingSwapPlayerId === socket.id) $('tableMessage').textContent = 'Choose an opponent to swap hands.';
-    else if (game.unoChallenge) $('tableMessage').textContent = `${game.unoChallenge.targetName} forgot to call UNO!`;
-    else $('tableMessage').textContent = '';
 
+    // Opponents drawing: cards travel from the deck to their seat.
+    let anyOpponentDrew = false;
+    next.players.forEach(player => {
+      const before = prevCounts.get(player.id);
+      if (!firstFrame && before !== undefined && player.count > before && player.id !== socket.id && layout) {
+        const seat = document.querySelector(`.seat[data-player-id="${CSS.escape(player.id)}"] .seat-avatar`);
+        if (seat) {
+          const rect = seat.getBoundingClientRect();
+          const amount = player.count - before;
+          for (let i = 0; i < Math.min(amount, 4); i += 1) {
+            flyCard({ back: true, from: drawPileSource(), to: { ...centerOf(rect), w: layout.oppW, h: layout.oppH }, rotTo: 180, duration: 420, delay: i * 90 });
+          }
+          seatBubble(player.id, `+${amount}`, amount >= 2 ? 'is-bad' : '');
+          anyOpponentDrew = true;
+        }
+      }
+    });
+    if (anyOpponentDrew) playSfx('draw');
+    prevCounts = new Map(next.players.map(player => [player.id, player.count]));
+
+    renderHand(next);
+
+    // Direction + colour.
+    const color = COLOR_HEX[game.color] || COLOR_HEX.red;
+    $('field').style.setProperty('--cur', color);
+    $('dirRing').classList.toggle('is-reverse', game.direction === -1);
+    $('deckCount').textContent = String(game.drawCount);
+
+    // Discard pile — a few cards stacked with stable, slightly messy angles.
+    const top = game.top;
+    let isNewTop = false;
+    if (top && top.id !== lastTopId) {
+      const seed = hashId(top.id);
+      discardStack.push({ card: top, rot: discardRot(top.id), dx: ((seed >> 5) % 13) - 6, dy: ((seed >> 9) % 11) - 5 });
+      if (discardStack.length > 5) discardStack.shift();
+      lastTopId = top.id;
+      isNewTop = true;
+    }
+    const pile = $('discardPile');
+    pile.replaceChildren();
+    discardStack.forEach((entry, index) => {
+      const wrap = document.createElement('div');
+      const isTop = index === discardStack.length - 1;
+      wrap.className = `discard-card${isTop ? ' is-top' : ''}`;
+      wrap.style.transform = `translate(${entry.dx}px, ${entry.dy}px) rotate(${entry.rot}deg)`;
+      const cardEl = createCardElement(entry.card);
+      cardEl.style.width = '100%'; cardEl.style.height = '100%';
+      if (!isTop) cardEl.style.filter = 'brightness(.82)';
+      wrap.appendChild(cardEl);
+      if (isTop && entry.card.color === 'wild') {
+        const ring = document.createElement('i');
+        ring.className = 'discard-wild-ring';
+        wrap.appendChild(ring);
+      }
+      if (isTop && isNewTop && !firstFrame) {
+        if (flightThisRender > 0) { wrap.style.visibility = 'hidden'; window.setTimeout(() => { wrap.style.visibility = ''; }, flightThisRender - 30); }
+        else if (!prefs.reduceMotion) wrap.classList.add('is-new');
+      }
+      pile.appendChild(wrap);
+    });
+
+    renderStatus(next);
+
+    // 6 Reaction — a round button on the table, not a screen-wide overlay.
     const reaction = game.sixReaction;
-    $('reactionOverlay').classList.toggle('is-hidden', !reaction?.active);
+    const six = $('reactionOverlay');
+    six.classList.toggle('is-hidden', !reaction?.active);
     if (reaction?.active) {
       const pressed = reaction.pressed.length;
       const total = reaction.playerIds.length;
-      $('reactionStatus').textContent = reaction.pressed.includes(socket.id) ? `You're safe · ${pressed}/${total}` : `${pressed}/${total} safe`;
-      $('pressSix').disabled = reaction.pressed.includes(socket.id);
-      $('pressSix').classList.toggle('already-pressed', reaction.pressed.includes(socket.id));
+      const safe = reaction.pressed.includes(socket.id);
+      $('reactionStatus').textContent = safe ? `SAFE ${pressed}/${total}` : `${pressed}/${total} SAFE`;
+      six.disabled = safe;
+      six.classList.toggle('already-pressed', safe);
+      $('reactionCountdown').textContent = String(Math.max(0, Math.ceil((reaction.deadline - Date.now()) / 1000)));
       if (!reactionTicker) {
         reactionTicker = window.setInterval(() => {
           const current = state?.game?.sixReaction;
@@ -587,7 +811,8 @@
 
     if (game.unoAnnouncement && game.unoAnnouncement.id !== lastUnoAnimationId) {
       lastUnoAnimationId = game.unoAnnouncement.id;
-      showUnoSplash(game.unoAnnouncement.playerId === socket.id ? 'UNO! YOU CALLED IT!' : `${next.players.find(p => p.id === game.unoAnnouncement.playerId)?.name || 'PLAYER'} CALLED UNO!`);
+      const caller = game.unoAnnouncement.playerId;
+      showUnoSplash(caller === socket.id ? 'UNO!' : `${next.players.find(p => p.id === caller)?.name || 'PLAYER'}: UNO!`);
       playSfx('uno');
     }
     if (game.winnerId && lastWinnerShown !== `${game.roundId}:${game.winnerId}`) {
@@ -595,9 +820,7 @@
       showWinner(game.winnerId === socket.id, game.winnerName);
     }
     if (lastGameSnapshot && game.lastCardId && game.lastCardId !== lastGameSnapshot.lastCardId) {
-      const value = game.lastAction;
-      if (value === 'Skip' || value === 'Reverse' || value === 'Draw2' || value === 'Wild4') playSfx('action');
-      else playSfx('card');
+      playSfx(['Skip', 'Reverse', 'Draw2', 'Wild4'].includes(game.lastAction) ? 'action' : 'card');
     }
     lastGameSnapshot = { lastCardId: game.lastCardId, lastAction: game.lastAction };
   }
@@ -609,7 +832,7 @@
     splash.classList.remove('uno-splash-in');
     void splash.offsetWidth;
     splash.classList.add('uno-splash-in');
-    window.setTimeout(() => splash.classList.add('is-hidden'), prefs.reduceMotion ? 700 : 1650);
+    window.setTimeout(() => splash.classList.add('is-hidden'), prefs.reduceMotion ? 600 : 1150);
   }
 
   function showWinner(isMe, name) {
@@ -631,6 +854,8 @@
       $('winOverlay').classList.add('is-hidden');
       lastWinnerShown = null;
       lastGameSnapshot = null;
+      discardStack = []; lastTopId = null; discardRound = null; prevCounts = new Map(); hoverIndex = -1; armedId = null; handView = { cards: [], els: [] };
+      $('myHand')?.replaceChildren();
       renderLobby(next);
       showScreen('lobbyScreen');
       if (wasStarted) playSfx('click');
@@ -681,9 +906,8 @@
     playSfx('click');
   }
   $('splashScreen').addEventListener('click', startExperience);
-  window.addEventListener('resize', () => {
-    if (state?.started && state.game) renderHand(state);
-  }, { passive: true });
+  window.addEventListener('resize', relayout, { passive: true });
+  if (window.ResizeObserver) new ResizeObserver(() => relayout()).observe($('field'));
   $('splashScreen').addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') startExperience(); });
   $('pressStart').addEventListener('click', event => { event.stopPropagation(); startExperience(); });
   $('createRoomOpen').addEventListener('click', () => { playSfx('click'); openRoomSetup('create'); });
@@ -721,7 +945,17 @@
     catch { window.prompt('Copy this room code:', code); }
   });
   $('leaveGame').addEventListener('click', () => {
-    if (!window.confirm('Leave this table? Your seat will be removed from the game.')) return;
+    const button = $('leaveGame');
+    const label = button.querySelector('em');
+    if (!button.classList.contains('is-confirm')) {
+      button.classList.add('is-confirm');
+      label.textContent = 'Tap again to leave';
+      leaveTimer = window.setTimeout(() => { button.classList.remove('is-confirm'); label.textContent = 'Leave'; }, 3000);
+      return;
+    }
+    clearTimeout(leaveTimer);
+    button.classList.remove('is-confirm');
+    label.textContent = 'Leave';
     socket.emit('leaveRoom');
     $('winOverlay').classList.add('is-hidden');
     state = null; roomCode = ''; lastGameSnapshot = null;
@@ -736,18 +970,9 @@
   $('passTurn').addEventListener('click', () => socket.emit('passTurn'));
   $('takePenalty').addEventListener('click', () => socket.emit('drawPenalty'));
   $('unoButton').addEventListener('click', () => { socket.emit('callUno'); playSfx('uno'); });
-  $('catchUnoButton').addEventListener('click', () => {
-    const challenge = state?.game?.unoChallenge;
-    if (!challenge || Date.now() > challenge.deadline || challenge.targetId === socket.id) {
-      $('unoCatchBanner').classList.add('is-hidden');
-      return;
-    }
-    socket.emit('catchUno', challenge.targetId);
-    playSfx('action');
-  });
   $('challengeWildFour').addEventListener('click', () => { socket.emit('challengeWild4'); playSfx('action'); });
   $('acceptWildFour').addEventListener('click', () => { socket.emit('drawPenalty'); playSfx('draw'); });
-  $('pressSix').addEventListener('click', () => { if (state?.game?.sixReaction) socket.emit('pressSix', state.game.sixReaction.id); playSfx('reaction'); });
+  $('reactionOverlay').addEventListener('click', () => { if (state?.game?.sixReaction?.active) socket.emit('pressSix', state.game.sixReaction.id); playSfx('reaction'); });
   $('cancelWild').addEventListener('click', () => { pendingWildCardId = null; closeModal('wildPicker'); });
   document.querySelectorAll('[data-wild-color]').forEach(button => button.addEventListener('click', () => {
     const color = button.dataset.wildColor;
@@ -764,6 +989,48 @@
     showScreen('mainMenu');
   });
 
+  // Hand interaction: hover is resolved from layout (hitTestHand), clicks use the same hit-test.
+  (() => {
+    const hand = $('myHand');
+    hand.tabIndex = 0;
+    hand.addEventListener('pointermove', event => {
+      lastPointerType = event.pointerType || 'mouse';
+      if (lastPointerType === 'touch' && event.buttons === 0) return;
+      setHover(hitTestHand(event));
+    });
+    hand.addEventListener('pointerdown', event => {
+      lastPointerType = event.pointerType || 'mouse';
+      setHover(hitTestHand(event));
+    });
+    hand.addEventListener('pointerleave', event => { if (event.pointerType !== 'touch') setHover(-1); });
+    hand.addEventListener('click', event => {
+      const index = hitTestHand(event);
+      if (index < 0) return;
+      const card = handView.cards[index];
+      const element = handView.els[index];
+      if (!card) return;
+      if (lastPointerType === 'touch' && armedId !== card.id) {
+        // First tap lifts the card so you can read it; second tap plays it.
+        armedId = card.id;
+        setHover(index);
+        return;
+      }
+      onCardChosen(card, element);
+    });
+    hand.addEventListener('keydown', event => {
+      const count = handView.cards.length;
+      if (!count) return;
+      if (event.key === 'ArrowRight') { setHover(Math.min(count - 1, hoverIndex < 0 ? 0 : hoverIndex + 1)); event.preventDefault(); }
+      else if (event.key === 'ArrowLeft') { setHover(Math.max(0, hoverIndex < 0 ? count - 1 : hoverIndex - 1)); event.preventDefault(); }
+      else if ((event.key === 'Enter' || event.key === ' ') && hoverIndex >= 0) { onCardChosen(handView.cards[hoverIndex], handView.els[hoverIndex]); event.preventDefault(); }
+      else if (event.key === 'Escape') setHover(-1);
+    });
+    hand.addEventListener('blur', () => { if (lastPointerType !== 'touch') setHover(-1); });
+    document.addEventListener('pointerdown', event => {
+      if (!hand.contains(event.target)) { armedId = null; if (event.pointerType === 'touch') setHover(-1); }
+    });
+  })();
+
   // Real-time connection and server-authoritative state.
   socket.on('connected', () => socket.emit('resumeSession', sessionToken));
   socket.on('resumeFailed', () => {
@@ -775,21 +1042,18 @@
     roomCode = data.code;
     if (data.token) { sessionToken = data.token; localStorage.setItem(TOKEN_KEY, sessionToken); }
     closeModal('roomSetupModal');
-    toast(data.resumed ? 'Welcome back to your table.' : `Room ${data.code} is ready.`, 'success');
   });
   socket.on('roomLeft', () => { state = null; roomCode = ''; showScreen('mainMenu'); });
   socket.on('state', applyState);
-  socket.on('toast', data => { toast(data?.text || 'Something went wrong.', data?.kind || 'warning'); if ((data?.kind || 'warning') === 'warning') playSfx('error'); });
-  socket.on('notice', data => {
-    if (!data || data.id === lastNoticeId) return;
-    lastNoticeId = data.id;
-    toast(data.text, data.kind || 'info');
-    if (data.kind === 'penalty') playSfx('draw');
-    if (data.kind === 'uno') playSfx('uno');
-    if (data.kind === 'win') playSfx('win');
+  const inGame = () => document.body.dataset.screen === 'gameScreen';
+  socket.on('toast', data => {
+    const text = data?.text || 'Something went wrong.';
+    if (inGame()) flash(text); else toast(text, data?.kind || 'warning');
+    if ((data?.kind || 'warning') === 'warning') playSfx('error');
   });
-  socket.on('connect_error', () => toast('Connection hiccup. Trying to reconnect…', 'warning'));
-  socket.on('reconnect', () => { socket.emit('resumeSession', sessionToken); toast('Connection restored.', 'success'); });
+  // Server 'notice' events are intentionally not shown: seat bubbles, card flights and the status line already convey them.
+  socket.on('connect_error', () => { if (inGame()) flash('Reconnecting…', 2500); else toast('Connection hiccup. Trying to reconnect…', 'warning'); });
+  socket.on('reconnect', () => { socket.emit('resumeSession', sessionToken); });
 
   updateAudioControls();
   activateTextureCardBack();

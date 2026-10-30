@@ -8,7 +8,8 @@
   <title>UNO — Play with friends</title>
   <link rel="icon" href="./assets/favicon.svg">
   <script src="/socket.io/socket.io.js" defer></script>
-  <link rel="stylesheet" href="./style.css?v=uno-entry-remake-2">
+  <link rel="stylesheet" href="./style.css?v=uno-v3">
+  <link rel="stylesheet" href="./game.css?v=uno-v3">
   <script src="./client.js" defer></script>
 </head>
 <body>
@@ -111,50 +112,62 @@
   </main>
 
   <main id="gameScreen" class="screen game-screen is-hidden" aria-label="UNO game table">
-    <header class="game-topbar">
-      <button id="leaveGame" class="game-exit" type="button" aria-label="Leave game">← <span>Leave table</span></button>
-      <div class="game-room-meta"><span class="live-dot"></span><span>ROOM <b id="gameRoomCode">------</b></span></div>
-      <div class="game-top-actions"><button id="gameSettings" class="icon-button icon-button-dark" type="button" aria-label="Settings">⚙</button></div>
-    </header>
-    <section class="table-stage">
-      <div class="table-halo" aria-hidden="true"></div>
-      <div class="table-felt">
-        <div class="table-inner-ring" aria-hidden="true"></div>
-        <div class="table-stitch" aria-hidden="true"></div>
-        <div class="table-logo" aria-hidden="true"><span>UNO</span><small>LET'S PLAY</small></div>
-        <div id="opponents" class="opponents" aria-label="Opponents"></div>
-        <div class="center-table">
-          <div class="turn-readout"><span class="turn-indicator" aria-hidden="true"></span><span id="turnLabel">Waiting for game…</span><span id="directionIndicator" class="direction-indicator" aria-label="Play direction">↻</span></div>
-          <div class="piles-row">
-            <div class="pile-wrap draw-wrap">
-              <span class="pile-caption">DRAW PILE</span>
-              <button id="drawPile" class="pile-button" type="button" aria-label="Draw a card"><img src="/assets/card-back.svg" alt=""><span class="deck-stack deck-stack-one"></span><span class="deck-stack deck-stack-two"></span></button>
-              <small id="deckCount">108 cards</small>
-            </div>
-            <div class="play-arrow" aria-hidden="true">➜</div>
-            <div class="pile-wrap discard-wrap">
-              <span class="pile-caption">PLAY PILE</span>
-              <div class="discard-card-stage">
-                <div id="discardPile" class="discard-pile"><div class="card-placeholder">UNO</div></div>
-                <div class="direction-ring" aria-hidden="true"><span class="ring-arrow">➜</span><span class="ring-arrow ring-arrow-two">➜</span></div>
-              </div>
-              <span id="currentColorBadge" class="current-color-badge"><i></i><span>RED</span></span>
-            </div>
-          </div>
-          <div id="tableMessage" class="table-message" role="status" aria-live="polite"></div>
+    <div id="field" class="field">
+      <div class="field-bg" aria-hidden="true"></div>
+
+      <header class="field-bar">
+        <button id="leaveGame" class="bar-btn" type="button" aria-label="Leave table"><span aria-hidden="true">←</span><em>Leave</em></button>
+        <div class="bar-right">
+          <span class="room-chip">ROOM <b id="gameRoomCode">------</b></span>
+          <button id="gameSettings" class="bar-btn bar-icon" type="button" aria-label="Settings">⚙</button>
         </div>
-        <div id="penaltyBanner" class="penalty-banner is-hidden"><span class="penalty-mark">＋</span><span id="penaltyText">DRAW 2</span><button id="takePenalty" type="button">Take cards</button></div>
-        <div id="unoCatchBanner" class="uno-catch-banner is-hidden"><div><b>UNO MISSED!</b><small id="unoCatchText">Catch the player before the next move.</small></div><button id="catchUnoButton" type="button">CATCH!</button></div>
-        <div id="wildFourBanner" class="wild-four-banner is-hidden"><div><b>WILD DRAW FOUR</b><small>Accept the penalty or challenge the play.</small></div><button id="challengeWildFour" class="challenge-button" type="button">Challenge</button><button id="acceptWildFour" type="button">Draw 4</button></div>
-        <div id="swapBanner" class="swap-banner is-hidden"><b>7 — SWAP HANDS</b><span>Choose an opponent to exchange hands.</span></div>
-        <div id="reactionOverlay" class="reaction-overlay is-hidden"><div class="reaction-card"><p>QUICK!</p><h2>6 REACTION</h2><p>Tap to stay safe.</p><div id="reactionCountdown" class="reaction-countdown">4</div><button id="pressSix" type="button">I'M SAFE!</button><small id="reactionStatus">Waiting for reactions…</small></div></div>
+      </header>
+
+      <div id="opponents" class="opponents" aria-label="Opponents"></div>
+
+      <section class="center" aria-label="Play area">
+        <div id="dirRing" class="dir-ring" aria-hidden="true">
+          <svg viewBox="0 0 200 200"><circle class="ring-track" cx="100" cy="100" r="92"/><path class="ring-arrow" d="M106 0 L126 8 L106 16 L112 8 Z"/><path class="ring-arrow" transform="rotate(90 100 100)" d="M106 0 L126 8 L106 16 L112 8 Z"/><path class="ring-arrow" transform="rotate(180 100 100)" d="M106 0 L126 8 L106 16 L112 8 Z"/><path class="ring-arrow" transform="rotate(270 100 100)" d="M106 0 L126 8 L106 16 L112 8 Z"/></svg>
+        </div>
+        <div class="piles">
+          <div class="pile pile-draw">
+            <button id="drawPile" class="draw-pile" type="button" aria-label="Draw a card">
+              <span class="stack-card s3"></span><span class="stack-card s2"></span><span class="stack-card s1"></span>
+              <img id="drawPileImg" class="draw-top" src="/cards/BACK.png" alt="" draggable="false">
+              <b id="drawBadge" class="draw-badge is-hidden">+2</b>
+            </button>
+            <small id="deckCount" class="pile-count">108</small>
+          </div>
+          <div class="pile pile-discard">
+            <div id="discardGlow" class="discard-glow" aria-hidden="true"></div>
+            <div id="discardPile" class="discard-pile"></div>
+          </div>
+        </div>
+        <div id="tableMessage" class="status-line" role="status" aria-live="polite"></div>
+        <div id="actionDock" class="action-dock">
+          <button id="passTurn" class="dock-btn is-hidden" type="button">Pass</button>
+          <button id="takePenalty" class="dock-btn dock-danger is-hidden" type="button">Take 2</button>
+          <button id="challengeWildFour" class="dock-btn is-hidden" type="button">Challenge</button>
+          <button id="acceptWildFour" class="dock-btn dock-danger is-hidden" type="button">Draw 4</button>
       </div>
-    </section>
-    <section class="player-zone">
-      <div class="player-hud"><div class="you-badge"><span id="myAvatar" class="avatar avatar-you">Y</span><div><b id="myNameLabel">YOU</b><small id="myHandCount">7 CARDS</small></div><span id="myTurnChip" class="turn-chip is-hidden">YOUR TURN</span></div><div class="hand-actions"><button id="passTurn" class="btn btn-pass is-hidden" type="button">Pass turn</button><button id="unoButton" class="uno-button" type="button" disabled><span>UNO!</span><small>CALL IT</small></button></div></div>
+        <button id="reactionOverlay" class="six-button is-hidden" type="button"><span id="reactionCountdown" class="six-count">4</span><b>TAP!</b><small id="reactionStatus">6 REACTION</small></button>
+        <div id="wildPicker" class="wild-wheel is-hidden" role="dialog" aria-label="Choose a colour">
+          <button data-wild-color="red" class="wheel-slice slice-red" type="button" aria-label="Red"></button>
+          <button data-wild-color="yellow" class="wheel-slice slice-yellow" type="button" aria-label="Yellow"></button>
+          <button data-wild-color="blue" class="wheel-slice slice-blue" type="button" aria-label="Blue"></button>
+          <button data-wild-color="green" class="wheel-slice slice-green" type="button" aria-label="Green"></button>
+          <button id="cancelWild" class="wheel-cancel" type="button" aria-label="Cancel">×</button>
+        </div>
+      </section>
+
+
+      <div id="youSeat" class="you-seat">
+        <span id="myAvatar" class="seat-avatar">Y</span>
+        <span class="you-meta"><b id="myNameLabel">YOU</b><small id="myHandCount">7</small></span>
+      </div>
       <div id="myHand" class="my-hand" aria-label="Your cards"></div>
-      <div class="hand-footnote"><span id="handHint">Your hand · Select a highlighted card to play</span><span id="handSortLabel">PLAYABLE CARDS GLOW</span></div>
-    </section>
+      <button id="unoButton" class="uno-btn" type="button" disabled aria-label="Call UNO"><span>UNO</span></button>
+    </div>
   </main>
 
   <div id="roomSetupModal" class="modal-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="setupTitle">
@@ -194,9 +207,6 @@
     </section>
   </div>
 
-  <div id="wildPicker" class="modal-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="wildTitle">
-    <section class="modal-card wild-picker-card"><p class="eyebrow">WILD CARD</p><h2 id="wildTitle">Choose a colour</h2><div class="wild-colors"><button data-wild-color="red" class="wild-color red" type="button" aria-label="Red"></button><button data-wild-color="yellow" class="wild-color yellow" type="button" aria-label="Yellow"></button><button data-wild-color="green" class="wild-color green" type="button" aria-label="Green"></button><button data-wild-color="blue" class="wild-color blue" type="button" aria-label="Blue"></button></div><button id="cancelWild" class="text-button" type="button">Cancel</button></section>
-  </div>
 
   <div id="unoSplash" class="uno-splash is-hidden" aria-live="assertive"><div class="uno-splash-card"><img class="uno-call-art" src="/assets/uno-call.png" alt="UNO call"><p id="unoSplashCaption">CALLED IT!</p></div></div>
   <div id="winOverlay" class="win-overlay is-hidden" role="dialog" aria-modal="true"><div class="win-card"><div class="win-confetti" aria-hidden="true">✦　✦　✦　✦　✦</div><p class="eyebrow">ROUND COMPLETE</p><h2 id="winnerTitle">YOU WIN!</h2><p id="winnerDescription">That was a good hand.</p><button id="backToLobby" class="btn btn-primary btn-large" type="button"><span>Back to lobby</span><b>→</b></button></div></div>

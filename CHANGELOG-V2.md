@@ -40,3 +40,9 @@
 - This ZIP is a new V2 project build; it was not pushed to GitHub because a repository write connection was unavailable in the build environment. The `main` branch was not modified.
 - Exact classic PC texture crops are not bundled because extracted game artwork does not have verified public redistribution rights in the referenced archive. Run `tools/slice_uno_texture.py` after locally adding the selected sheet.
 - A complete real-time playtest still requires `npm install` and testing with multiple browser sessions.
+
+## V3 table rework
+- Game screen rebuilt as a PC-UNO-style playfield: opponents' face-down fans around the edges, draw/discard piles in the centre inside a direction ring tinted with the current colour, your hand fanned directly on the table (no tray/panel).
+- Hand hover now resolved from layout, not transformed boxes: no flicker, no neighbour stealing hover; neighbours spread to reveal the lifted card. Hand is auto-sorted by colour/value; arrow keys + Enter work; on touch, first tap lifts and second tap plays.
+- Popups removed: toasts/notices, banners, wild-colour modal, 6-reaction overlay and leave confirm are replaced by a single status line, seat bubbles (+N), contextual pills, an on-table colour wheel, a round TAP button and a two-tap leave. UNO catch is a CATCH! chip on the offender's seat.
+- New `docs/game.css`; old game rules stripped from `docs/style.css`. Re-theme the table via `--bg-1/2/3` in `.field`.
