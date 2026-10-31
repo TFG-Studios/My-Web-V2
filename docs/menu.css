@@ -181,3 +181,11 @@ body[data-screen="lobbyScreen"]::before, body[data-screen="lobbyScreen"]::after 
   .u-card-2 { left: 3%; top: 76%; } .u-card-4 { right: 3%; top: 78%; } .u-card-7 { left: 34%; bottom: 1%; } .u-card-8 { right: 34%; bottom: 2%; }
   .u-card-1 { left: 3%; top: 4%; } .u-card-3 { right: 3%; top: 5%; }
 }
+/* shared character avatars in the room scene */
+.logo-text text { font-family: var(--font-ui), "Arial Black", sans-serif; font-weight: 800; font-style: italic; }
+.u-avatar { overflow: hidden; background: #cfe3ff; }
+.u-avatar svg { display: block; width: 100%; height: 100%; }
+.u-av-0 { background: #cfe3ff; } .u-av-1 { background: #fdf3b0; } .u-av-2 { background: #c8f0e4; } .u-av-3 { background: #ffd0e8; } .u-av-4 { background: #e5d4ff; }
+.u-crown { z-index: 2; }
+.u-avatar { overflow: visible; }
+.u-avatar svg { border-radius: 12%; }

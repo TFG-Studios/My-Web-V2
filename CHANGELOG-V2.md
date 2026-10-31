@@ -52,3 +52,10 @@
 - Colour wheel is a thick 3D pie shown to every player (server relays `wildPicking`), including live slice highlight.
 - UNO button restyled as an arcade/bomb-style hazard button; "UNO!" is now a 3D extruded effect with stars, placed in front of the caller and oriented the way the caller sees it.
 - Draw pile is a real 12-card stack at the top-left of the table, rotated -45°. Turn text/counters trimmed; static files are served with no-cache.
+
+## V6 — Ubisoft-style gameplay scene
+- 16:9 logical stage (1280×720, portrait 560×1100) scaled uniformly; background fills extra space.
+- Dark-crimson → red → orange/yellow environment, glossy elliptical tabletop with glowing rim and facets, floating squares/diamonds/fragments.
+- Seat-based opponent fans (row / diagonal) from one generic renderer, with mirrored reflections; character avatars, coloured nameplates, white card-count badges; active player glows gold.
+- Draw deck: thick 3D stack at upper-left, own clickable area. Discard: up to 7 layered cards. Big curved opposing arrows that flip with direction.
+- Player hand: dynamic curved fan, layout-based hover (no flicker). Contextual UNO button, metallic gear; Leave moved into Settings; room code / YOUR TURN / back button removed from the table.
