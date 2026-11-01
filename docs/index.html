@@ -11,10 +11,10 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&display=swap">
-  <link rel="stylesheet" href="./style.css?v=uno-v7">
-  <link rel="stylesheet" href="./menu.css?v=uno-v7">
-  <link rel="stylesheet" href="./game.css?v=uno-v7">
-  <script src="./client.js?v=uno-v7" defer></script>
+  <link rel="stylesheet" href="./style.css?v=uno-v8">
+  <link rel="stylesheet" href="./menu.css?v=uno-v8">
+  <link rel="stylesheet" href="./game.css?v=uno-v8">
+  <script src="./client.js?v=uno-v8" defer></script>
 </head>
 <body>
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -122,7 +122,7 @@
 
         <section class="center" aria-label="Table controls">
           <div id="tableMessage" class="status-line" role="status" aria-live="polite"></div>
-          <button id="reactionOverlay" class="six-button is-hidden" type="button"><span id="reactionCountdown" class="six-count">4</span><b>TAP!</b><small id="reactionStatus">6 REACTION</small></button>
+          <button id="reactionOverlay" class="six-button is-hidden" type="button" aria-label="Tap now!"><svg class="six-ring" viewBox="0 0 100 100" aria-hidden="true"><circle class="six-ring-bg" cx="50" cy="50" r="46"/><circle id="sixRing" class="six-ring-fg" cx="50" cy="50" r="46"/></svg><span id="sixLabel" class="six-label">TAP!</span><small id="reactionStatus"></small></button>
           <div id="wildPicker" class="wild-stage is-hidden" role="dialog" aria-label="Choose a colour">
             <div class="wheel-shadow" aria-hidden="true"></div>
             <div id="wheel3d" class="wheel-3d">

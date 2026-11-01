@@ -321,7 +321,7 @@
   function relayout() {
     if (!state?.started || !state.game) return;
     layoutField();
-    renderOpponents(state);
+    if (curView) renderOpponents(curView);
     applyHandTransforms();
   }
 
@@ -348,29 +348,83 @@
     $('globalLiveRegion').textContent = text;
   }
 
-  function flyCard({ card, back = false, from, to, rotFrom = 0, rotTo = 0, duration = 440, delay = 0, tilt = 0 }) {
-    if (prefs.reduceMotion) return 0;
-    const el = back ? makeCardBack() : createCardElement(card);
-    el.classList.add('flying-card');
-    el.style.width = `${from.w}px`; el.style.height = `${from.h}px`;
-    el.style.left = `${from.x - from.w / 2}px`; el.style.top = `${from.y - from.h / 2}px`;
-    $('cardFlightLayer').appendChild(el);
+  /* ------------------------------------------------------------------
+     Real-card flights. A flying card is a 2-sided 3D object: it arcs through the air,
+     tilts from the table plane to the viewer, can flip face-down → face-up mid-flight and
+     lands exactly on its destination slot (the slot is rendered hidden until it lands).
+  ------------------------------------------------------------------- */
+  const FLY_P = 1000;
+  const ABORT = Symbol('abort');
+  const director = { queue: [], running: false, skip: false, gen: 0, anims: new Set(), shown: null, view: null };
+  const sleep = ms => (director.skip || ms <= 0 ? Promise.resolve() : new Promise(resolve => setTimeout(resolve, ms)));
+  const FAST = () => director.skip || prefs.reduceMotion || document.hidden;
+
+  function flyCard({ card = null, back = false, from, to, flip = null, duration = 650, delay = 0, arc = -70, spin = 0 }) {
+    if (FAST() || !from || !to) return Promise.resolve();
+    const wrap = document.createElement('div');
+    wrap.className = 'fly3d';
+    wrap.style.cssText = `width:${from.w}px;height:${from.h}px;left:${from.x - from.w / 2}px;top:${from.y - from.h / 2}px;`;
+    const inner = document.createElement('div');
+    inner.className = 'fly-inner';
+    const front = card ? createCardElement(card) : makeCardBack();
+    front.classList.add('fly-face', 'front');
+    const rear = makeCardBack();
+    rear.classList.add('fly-face', 'rear');
+    inner.append(front, rear);
+    wrap.appendChild(inner);
+    $('cardFlightLayer').appendChild(wrap);
     const dx = to.x - from.x, dy = to.y - from.y, s = to.w / from.w;
-    el.animate([
-      { transform: `perspective(1100px) translate(0px, 0px) rotate(${rotFrom}deg) scale(1) rotateX(0deg)` },
-      { transform: `perspective(1100px) translate(${dx * .5}px, ${dy * .5 - 40}px) rotate(${(rotFrom + rotTo) / 2}deg) scale(${((1 + s) / 2) * 1.08}) rotateX(${tilt * .4}deg)`, offset: .55 },
-      { transform: `perspective(1100px) translate(${dx}px, ${dy}px) rotate(${rotTo}deg) scale(${s}) rotateX(${tilt}deg)` },
-    ], { duration, delay, easing: 'cubic-bezier(.22,.8,.25,1)', fill: 'both' }).onfinish = () => el.remove();
-    return duration + delay;
+    const fr = from.rot || 0, tr = (to.rot || 0) + spin, ft = from.tilt || 0, tt = to.tilt || 0;
+    const T = (x, y, t, r, sc) => `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) perspective(${FLY_P}px) rotateX(${t.toFixed(1)}deg) rotateZ(${r.toFixed(1)}deg) scale(${sc.toFixed(3)})`;
+    const dist = Math.hypot(dx, dy);
+    const lift = 1 + Math.min(0.3, dist / 2400 + 0.12);
+    const motion = wrap.animate([
+      { transform: T(0, 0, ft, fr, 1), easing: 'cubic-bezier(.32,0,.4,1)' },
+      { transform: T(dx * 0.55, dy * 0.55 + arc, ((ft + tt) / 2) * 0.4, fr + (tr - fr) * 0.55, ((1 + s) / 2) * lift), offset: 0.55, easing: 'cubic-bezier(.2,.7,.25,1)' },
+      { transform: T(dx, dy, tt, tr, s) },
+    ], { duration, delay, fill: 'both' });
+    director.anims.add(motion);
+    if (flip) {
+      const a = flip === 'toFront' ? 'rotateY(180deg)' : 'rotateY(0deg)', b = flip === 'toFront' ? 'rotateY(0deg)' : 'rotateY(180deg)';
+      const turn = inner.animate([{ transform: a }, { transform: b }], { duration: duration * 0.72, delay, easing: 'cubic-bezier(.4,0,.2,1)', fill: 'both' });
+      director.anims.add(turn);
+      turn.finished.catch(() => {}).then(() => director.anims.delete(turn));
+    } else if (back) inner.style.transform = 'rotateY(180deg)';
+    return motion.finished.catch(() => {}).then(() => { director.anims.delete(motion); wrap.remove(); });
   }
-  const pileTarget = () => ({ ...centerOf($('discardPile').getBoundingClientRect()), w: layout.pileW * layout.s, h: layout.pileH * layout.s });
-  const drawPileSource = () => ({ ...centerOf($('deck3d').getBoundingClientRect()), w: layout.deckW * layout.s, h: layout.deckH * layout.s });
+
+  const unitScale = () => layout.s;
+  const handPoint = el => ({ ...centerOf(el.getBoundingClientRect()), w: layout.handW * unitScale(), h: layout.handH * unitScale(), rot: el._angle || 0, tilt: 0 });
+  const miniPoint = el => ({ ...centerOf(el.getBoundingClientRect()), w: layout.oppW * unitScale(), h: layout.oppH * unitScale(), rot: Number(el.dataset.rot) || 0, tilt: 0 });
+  const deckPoint = () => ({ ...centerOf($('deck3d').getBoundingClientRect()), w: layout.deckW * unitScale(), h: layout.deckH * unitScale(), rot: -68, tilt: 54 });
+  function pileSlot(card) {
+    const seed = hashId(card.id);
+    return { rot: Math.round(discardRot(card.id) * 1.7), dx: ((seed >> 5) % 29) - 14, dy: ((seed >> 9) % 21) - 10 };
+  }
+  function pilePoint(card) {
+    const slot = pileSlot(card);
+    const c = centerOf($('discardPile').getBoundingClientRect());
+    return { x: c.x + slot.dx * unitScale(), y: c.y + slot.dy * unitScale() * 0.7, w: layout.pileW * unitScale(), h: layout.pileH * unitScale(), rot: slot.rot, tilt: 46 };
+  }
+  const pileFlightMs = who => (who === socket.id ? 680 : 780);
+
+  function floatText(anchor, text, kind = '') {
+    if (!anchor || FAST()) return;
+    const rect = anchor.getBoundingClientRect();
+    const el = document.createElement('div');
+    el.className = `float-text ${kind}`;
+    el.textContent = text;
+    el.style.left = `${rect.left + rect.width / 2}px`;
+    el.style.top = `${rect.top + rect.height * 0.25}px`;
+    $('cardFlightLayer').appendChild(el);
+    window.setTimeout(() => el.remove(), 1700);
+  }
 
   /* ------------------------------------------------------------------
      Choosing a card
   ------------------------------------------------------------------- */
   function onCardChosen(card, element) {
-    if (!state?.game || state.game.winnerId) return;
+    if (!state?.game || state.game.winnerId || director.running) return;
     const me = state.players.find(player => player.id === socket.id);
     if (!me?.isTurn) { rejectCard(element); return flash('Wait for your turn'); }
     if (!localCanPlay(card, state.game, state.game.hand || [])) {
@@ -455,14 +509,15 @@
   }
 
   /* ------------------------------------------------------------------
-     Opponents — one generic, seat-driven renderer.
-     Each seat = fan of face-down cards (+ mirrored reflection) and a separate panel.
+     Opponents — persistent seats (DOM is reused, so cards MOVE instead of popping).
+     One generic renderer: fan of face-down cards (+ mirrored reflection) and a panel.
   ------------------------------------------------------------------- */
-  function buildFan(count, cfg) {
+  const seatEls = new Map();
+  let curView = null;
+
+  function fanLayout(count, cfg) {
     const { oppW, oppH, portrait } = layout;
     const shown = Math.min(count, 14);
-    const fan = document.createElement('div');
-    fan.className = 'fan';
     const cards = [];
     let boxW, boxH;
     if (cfg.kind === 'row') {
@@ -482,21 +537,66 @@
       }
       boxW = step * Math.cos(a) * Math.max(0, shown - 1) + oppW * 1.5; boxH = step * Math.sin(a) * Math.max(0, shown - 1) + oppH * 1.25;
     }
-    cards.forEach((c, i) => {
-      const back = makeCardBack();
-      back.classList.add('mini-card');
-      back.style.transform = `translate(${c.x.toFixed(1)}px, ${c.y.toFixed(1)}px) rotate(${c.r.toFixed(1)}deg)`;
-      back.style.zIndex = String(i);
-      fan.appendChild(back);
-    });
-    return { fan, boxW, boxH };
+    return { cards, boxW, boxH };
   }
 
-  function renderOpponents(next) {
-    const game = next.game;
-    const meIndex = next.players.findIndex(player => player.id === socket.id);
-    const total = next.players.length;
-    const others = next.players
+  function updateFan(fan, cards, hidden) {
+    while (fan.children.length > cards.length) fan.lastElementChild.remove();
+    while (fan.children.length < cards.length) {
+      const back = makeCardBack();
+      back.classList.add('mini-card');
+      fan.appendChild(back);
+    }
+    cards.forEach((c, i) => {
+      const el = fan.children[i];
+      el.style.transform = `translate(${c.x.toFixed(1)}px, ${c.y.toFixed(1)}px) rotate(${c.r.toFixed(1)}deg)`;
+      el.style.zIndex = String(i);
+      el.dataset.rot = c.r.toFixed(1);
+      el.classList.toggle('is-arriving', i >= cards.length - hidden);
+    });
+  }
+
+  function ensureSeat(player) {
+    let rec = seatEls.get(player.id);
+    if (rec) return rec;
+    const seat = document.createElement('div');
+    seat.className = 'seat';
+    seat.dataset.playerId = player.id;
+    const wrap = document.createElement('div');
+    wrap.className = 'seat-fan';
+    const fan = document.createElement('div');
+    fan.className = 'fan';
+    const reflect = document.createElement('div');
+    reflect.className = 'fan-reflect';
+    reflect.setAttribute('aria-hidden', 'true');
+    const reflectFan = document.createElement('div');
+    reflectFan.className = 'fan';
+    reflect.appendChild(reflectFan);
+    wrap.append(fan, reflect);
+    const panel = document.createElement('div');
+    panel.className = 'seat-panel';
+    const plate = document.createElement('span');
+    plate.className = 'seat-plate';
+    const avatar = document.createElement('span');
+    avatar.className = 'seat-avatar';
+    const count = document.createElement('b');
+    count.className = 'seat-count';
+    panel.append(plate, avatar, count);
+    const swap = () => { if (curView?.game?.awaitingSwapPlayerId === socket.id && !director.running) socket.emit('swapHands', player.id); };
+    panel.addEventListener('click', swap); wrap.addEventListener('click', swap);
+    panel.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') swap(); });
+    seat.append(wrap, panel);
+    $('opponents').appendChild(seat);
+    rec = { seat, wrap, fan, reflectFan, panel, plate, avatar, count, avatarIndex: -1, chip: null };
+    seatEls.set(player.id, rec);
+    return rec;
+  }
+
+  function renderOpponents(view) {
+    const game = view.game;
+    const meIndex = view.players.findIndex(player => player.id === socket.id);
+    const total = view.players.length;
+    const others = view.players
       .map((player, index) => ({ player, index, order: (index - meIndex + total) % total }))
       .filter(entry => entry.player.id !== socket.id)
       .sort((a, b) => a.order - b.order);
@@ -504,71 +604,49 @@
     const seats = seatMaps[others.length] || seatMaps[4];
     const cfgSet = layout.portrait ? SEAT_CFG.portrait : SEAT_CFG.landscape;
     $('stage').classList.toggle('seats-4', others.length === 4);
-    const container = $('opponents');
-    container.replaceChildren();
-    const challenge = game?.unoChallenge && Date.now() <= game.unoChallenge.deadline ? game.unoChallenge : null;
+    const keep = new Set(others.map(entry => entry.player.id));
+    for (const [id, rec] of seatEls) if (!keep.has(id)) { rec.seat.remove(); seatEls.delete(id); }
+    const challenge = !view.anim && game?.unoChallenge && Date.now() <= game.unoChallenge.deadline ? game.unoChallenge : null;
+    const safe = !view.anim && game?.sixReaction?.active ? game.sixReaction.pressed : [];
     others.forEach(({ player, index }, order) => {
       const cfg = cfgSet[seats[order]] || cfgSet.top;
-      const seat = document.createElement('div');
-      seat.className = 'seat';
-      seat.dataset.playerId = player.id;
-
-      // fan + reflection
-      const { fan, boxW, boxH } = buildFan(player.count, cfg);
-      const wrap = document.createElement('div');
-      wrap.className = 'seat-fan';
-      wrap.style.cssText = `left:${cfg.hand[0]}%;top:${cfg.hand[1]}%;width:${boxW}px;height:${boxH}px;`;
-      const tilt = cfg.kind === 'diag' ? ` perspective(900px) rotateY(${cfg.side < 0 ? 36 : -36}deg)` : '';
-      wrap.style.transform = `translate(-50%, -50%)${tilt}`;
-      const reflect = document.createElement('div');
-      reflect.className = 'fan-reflect';
-      reflect.setAttribute('aria-hidden', 'true');
-      reflect.appendChild(fan.cloneNode(true));
-      reflect.firstChild.className = 'fan';
-      wrap.append(fan, reflect);
-
-      // info panel
-      const panel = document.createElement('div');
-      panel.className = `seat-panel acc-${index % 5}${player.isTurn && !game.winnerId ? ' is-active' : ''}${!player.connected ? ' is-offline' : ''}`;
-      panel.style.left = `${cfg.panel[0]}%`; panel.style.top = `${cfg.panel[1]}%`;
-      const plate = document.createElement('span');
-      plate.className = 'seat-plate';
-      plate.textContent = player.name;
-      const avatar = document.createElement('span');
-      avatar.className = 'seat-avatar';
-      avatar.appendChild(makeAvatarSvg(index));
-      const count = document.createElement('b');
-      count.className = 'seat-count';
-      count.textContent = String(player.count);
-      panel.append(plate, avatar, count);
+      const rec = ensureSeat(player);
+      const hidden = view.hiddenCards?.[player.id] || 0;
+      const { cards, boxW, boxH } = fanLayout(player.count, cfg);
+      rec.wrap.style.cssText = `left:${cfg.hand[0]}%;top:${cfg.hand[1]}%;width:${boxW}px;height:${boxH}px;`;
+      rec.wrap.style.transform = `translate(-50%, -50%)${cfg.kind === 'diag' ? ` perspective(900px) rotateY(${cfg.side < 0 ? 36 : -36}deg)` : ''}`;
+      updateFan(rec.fan, cards, hidden);
+      updateFan(rec.reflectFan, cards, hidden);
+      rec.panel.style.left = `${cfg.panel[0]}%`; rec.panel.style.top = `${cfg.panel[1]}%`;
+      rec.panel.className = `seat-panel acc-${index % 5}${player.isTurn && !game.winnerId ? ' is-active' : ''}${!player.connected ? ' is-offline' : ''}${safe.includes(player.id) ? ' is-safe' : ''}`;
+      if (rec.avatarIndex !== index) { rec.avatarIndex = index; rec.avatar.replaceChildren(makeAvatarSvg(index)); }
+      rec.plate.textContent = player.name;
+      rec.count.textContent = String(Math.max(0, player.count - hidden));
+      const swapMode = !view.anim && game?.awaitingSwapPlayerId === socket.id;
+      rec.panel.classList.toggle('swap-target', swapMode);
+      rec.wrap.classList.toggle('swap-target', swapMode);
+      rec.panel.style.pointerEvents = swapMode ? 'auto' : '';
+      rec.wrap.style.pointerEvents = swapMode ? 'auto' : '';
+      if (swapMode) { rec.panel.tabIndex = 0; rec.panel.setAttribute('role', 'button'); rec.panel.setAttribute('aria-label', `Swap hands with ${player.name}`); }
       if (challenge && challenge.targetId === player.id) {
-        const chip = document.createElement('button');
-        chip.type = 'button';
-        chip.className = 'catch-chip';
-        chip.textContent = 'CATCH!';
-        chip.addEventListener('click', () => { socket.emit('catchUno', player.id); playSfx('action'); chip.remove(); });
-        panel.appendChild(chip);
-      }
-      if (game?.awaitingSwapPlayerId === socket.id) {
-        for (const target of [panel, wrap]) {
-          target.classList.add('swap-target');
-          target.style.pointerEvents = 'auto'; target.style.cursor = 'pointer';
-          target.addEventListener('click', () => socket.emit('swapHands', player.id));
+        if (!rec.chip) {
+          rec.chip = document.createElement('button');
+          rec.chip.type = 'button';
+          rec.chip.className = 'catch-chip';
+          rec.chip.textContent = 'CATCH!';
+          rec.chip.addEventListener('click', () => { socket.emit('catchUno', player.id); playSfx('action'); rec.chip?.remove(); rec.chip = null; });
+          rec.panel.appendChild(rec.chip);
         }
-        panel.tabIndex = 0; panel.setAttribute('role', 'button'); panel.setAttribute('aria-label', `Swap hands with ${player.name}`);
-        panel.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') socket.emit('swapHands', player.id); });
-      }
-      seat.append(wrap, panel);
-      container.appendChild(seat);
+      } else if (rec.chip) { rec.chip.remove(); rec.chip = null; }
     });
     if (unoChallengeTicker) { clearTimeout(unoChallengeTicker); unoChallengeTicker = null; }
     if (challenge) {
-      unoChallengeTicker = window.setTimeout(() => document.querySelectorAll('.catch-chip').forEach(chip => chip.remove()), Math.max(0, challenge.deadline - Date.now() + 15));
+      unoChallengeTicker = window.setTimeout(() => { for (const rec of seatEls.values()) { rec.chip?.remove(); rec.chip = null; } }, Math.max(0, challenge.deadline - Date.now() + 15));
     }
   }
 
   function seatBubble(playerId, text, kind = '') {
-    const panel = document.querySelector(`.seat[data-player-id="${CSS.escape(playerId)}"] .seat-panel`);
+    const panel = playerId === socket.id ? $('youSeat') : seatEls.get(playerId)?.panel;
     if (!panel) return;
     const bubble = document.createElement('span');
     bubble.className = `seat-bubble ${kind}`;
@@ -580,16 +658,14 @@
   /* ------------------------------------------------------------------
      Your hand. Hover is resolved from the *layout* (never from transformed boxes) so
      lifting / spreading a card can never change which card is under the cursor.
-     All maths is in logical stage units; screen pixels are divided by layout.s.
   ------------------------------------------------------------------- */
   const COLOR_ORDER = { red: 0, yellow: 1, green: 2, blue: 3, wild: 4 };
   const VALUE_ORDER = { Skip: 10, Reverse: 11, Draw2: 12, Wild: 20, Wild4: 21 };
-  const HAND_CENTER = 0.52; // hand centre as a fraction of stage width
+  const HAND_CENTER = 0.52;
   function sortHand(hand) {
     const rank = card => (COLOR_ORDER[card.color] ?? 5) * 100 + (VALUE_ORDER[card.value] ?? (Number(card.value) || 0));
     return [...hand].sort((a, b) => rank(a) - rank(b) || String(a.id).localeCompare(String(b.id)));
   }
-
   function handMetrics(count) {
     const { w, handW, portrait } = layout;
     const avail = portrait ? w * 0.9 : Math.min(w * 0.5, 700);
@@ -597,7 +673,6 @@
     const total = step * Math.max(0, count - 1) + handW;
     return { step, total, left: -total / 2 };
   }
-
   function hitTestHand(event) {
     const count = handView.cards.length;
     if (!count || !layout) return -1;
@@ -612,14 +687,11 @@
     if (step <= 0) return 0;
     return clampNum(0, Math.floor((relX - left) / step), count - 1);
   }
-
   function setHover(index) {
     if (index === hoverIndex) return;
     hoverIndex = index;
     applyHandTransforms();
   }
-
-  // Curved fan whose spacing, tilt and curvature are computed from the actual hand size.
   function applyHandTransforms() {
     const els = handView.els;
     const count = els.length;
@@ -633,18 +705,13 @@
     const falloff = [0, 1, 0.6, 0.3, 0.12, 0.05];
     els.forEach((el, i) => {
       const off = i - (count - 1) / 2;
-      let x = off * step;
-      let y = off * off * arcK;
-      let angle = off * angStep;
-      let scale = 1;
+      let x = off * step, y = off * off * arcK, angle = off * angStep, scale = 1;
       if (el._playable) y -= 12;
-      if (hoverIndex >= 0) {
+      if (hoverIndex >= 0 && !el.classList.contains('is-arriving')) {
         if (i === hoverIndex) { y = -lift; angle = 0; scale = 1.1; }
-        else {
-          const d = i - hoverIndex;
-          x += Math.sign(d) * spread * (falloff[Math.min(Math.abs(d), 5)] || 0);
-        }
+        else { const d = i - hoverIndex; x += Math.sign(d) * spread * (falloff[Math.min(Math.abs(d), 5)] || 0); }
       }
+      el._angle = angle;
       el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) rotate(${angle.toFixed(2)}deg) scale(${scale})`;
       el.style.zIndex = String(i === hoverIndex ? 1000 : i + 1);
       el.classList.toggle('is-hovered', i === hoverIndex);
@@ -652,44 +719,29 @@
     });
   }
 
-  function renderHand(next) {
-    const game = next.game;
+  function renderHand(view) {
+    const game = view.game;
     const hand = sortHand(game.hand || []);
     const container = $('myHand');
-    const me = next.players.find(player => player.id === socket.id);
-    const meIndex = Math.max(0, next.players.findIndex(player => player.id === socket.id));
-    const isMyTurn = Boolean(me?.isTurn && !game.winnerId);
+    const me = view.players.find(player => player.id === socket.id);
+    const meIndex = Math.max(0, view.players.findIndex(player => player.id === socket.id));
+    const isMyTurn = Boolean(me?.isTurn && !game.winnerId && !view.anim);
+    const hiddenIds = view.hiddenHandIds || new Set();
     const oldElements = new Map([...container.querySelectorAll('[data-card-id]')].map(el => [el.dataset.cardId, el]));
     const newIds = new Set(hand.map(card => card.id));
-
-    // Card I just played: fly it from the hand to the discard pile.
-    if (game.lastCardId && game.lastCardId !== lastAnimatedCardId && game.lastPlayerId === socket.id && !newIds.has(game.lastCardId)) {
-      const played = oldElements.get(game.lastCardId);
-      if (played && layout) {
-        const rect = played.getBoundingClientRect();
-        flightThisRender = Math.max(flightThisRender, flyCard({
-          card: game.top && game.top.id === game.lastCardId ? game.top : { id: game.lastCardId, color: 'wild', value: 'Wild' },
-          from: { ...centerOf(rect), w: layout.handW * layout.s, h: layout.handH * layout.s }, to: pileTarget(),
-          rotTo: Math.round(discardRot(game.lastCardId) * 1.7), duration: 420, tilt: 46,
-        }));
-      }
-      lastAnimatedCardId = game.lastCardId;
-    }
     for (const [id, element] of oldElements) if (!newIds.has(id)) element.remove();
-
     const els = [];
-    const fresh = [];
-    hand.forEach((card, index) => {
+    hand.forEach(card => {
       let element = oldElements.get(card.id);
       if (!element) {
         element = createCardElement(card, { interactive: true });
         element.tabIndex = -1;
         container.appendChild(element);
-        fresh.push({ element, index });
       }
       const playable = isMyTurn && localCanPlay(card, game, hand);
       element._playable = playable;
       element.classList.toggle('is-unplayable', isMyTurn && !playable);
+      element.classList.toggle('is-arriving', hiddenIds.has(card.id));
       els.push(element);
     });
     handView = { cards: hand, els };
@@ -697,124 +749,142 @@
     if (!isMyTurn && armedId) armedId = null;
     applyHandTransforms();
 
-    // New cards slide in from the draw deck.
-    if (fresh.length && !prefs.reduceMotion && layout) {
-      const source = drawPileSource();
-      fresh.forEach(({ element }, order) => {
-        const rect = element.getBoundingClientRect();
-        const c = centerOf(rect);
-        const finalTransform = element.style.transform;
-        element.animate([
-          { transform: `translate(${(source.x - c.x) / layout.s}px, ${(source.y - c.y) / layout.s}px) rotate(-14deg) scale(.7)`, opacity: .4 },
-          { transform: finalTransform, opacity: 1 },
-        ], { duration: 420, delay: Math.min(order * 70, 420), easing: 'cubic-bezier(.2,.85,.25,1)', fill: 'backwards' });
-      });
-    }
-
-    // Own panel (same visual language as the opponents').
     const youPanel = $('youSeat');
-    $('myHandCount').textContent = String(hand.length);
+    $('myHandCount').textContent = String(Math.max(0, hand.length - hiddenIds.size));
     $('myNameLabel').textContent = me?.name || 'YOU';
     if (youPanel.dataset.avatar !== String(meIndex)) {
       youPanel.dataset.avatar = String(meIndex);
       $('myAvatar').replaceChildren(makeAvatarSvg(meIndex));
       youPanel.className = `seat-panel me acc-${meIndex % 5}`;
     }
-    youPanel.classList.toggle('is-active', isMyTurn);
+    youPanel.classList.toggle('is-active', Boolean(me?.isTurn && !game.winnerId));
+    youPanel.classList.toggle('is-safe', !view.anim && Boolean(game.sixReaction?.active && game.sixReaction.pressed.includes(socket.id)));
 
     const playableCount = hand.filter(card => localCanPlay(card, game, hand)).length;
-    const canCallUno = isMyTurn && hand.length === 2 && playableCount > 0 && game.pendingDraw === 0 && !game.pendingWild4 && !game.drawnPlayableCardId;
+    const calm = view.anim;
+    const canCallUno = !calm && isMyTurn && hand.length === 2 && playableCount > 0 && game.pendingDraw === 0 && !game.pendingWild4 && !game.drawnPlayableCardId;
     const uno = $('unoButton');
     uno.classList.toggle('is-hidden', !canCallUno);
     uno.disabled = Boolean(game.armedUno);
     uno.classList.toggle('is-called', Boolean(game.armedUno));
 
     const drawButton = $('drawPile');
-    drawButton.disabled = !isMyTurn || Boolean(game.winnerId) || Boolean(game.awaitingSwapPlayerId) || Boolean(game.sixReaction?.active) || Boolean(game.drawnPlayableCardId);
-    document.querySelector('.pile-draw').classList.toggle('draw-ready', isMyTurn && !playableCount && !game.pendingWild4 && !game.drawnPlayableCardId && !game.pendingDraw);
+    drawButton.disabled = calm || !isMyTurn || Boolean(game.winnerId) || Boolean(game.awaitingSwapPlayerId) || Boolean(game.sixReaction?.active) || Boolean(game.drawnPlayableCardId);
+    document.querySelector('.pile-draw').classList.toggle('draw-ready', !calm && isMyTurn && !playableCount && !game.pendingWild4 && !game.drawnPlayableCardId && !game.pendingDraw);
     const badge = $('drawBadge');
-    badge.classList.toggle('is-hidden', !(game.pendingDraw > 0));
+    badge.classList.toggle('is-hidden', calm || !(game.pendingDraw > 0));
     if (game.pendingDraw > 0) badge.textContent = `+${game.pendingDraw}`;
 
-    // Contextual pills — only present while they are actionable.
-    const wildTarget = Boolean(isMyTurn && game.pendingWild4?.targetId === socket.id);
-    $('passTurn').classList.toggle('is-hidden', !(isMyTurn && game.drawnPlayableCardId));
-    $('takePenalty').classList.toggle('is-hidden', !(isMyTurn && game.pendingDraw > 0 && !game.pendingWild4));
+    const wildTarget = Boolean(!calm && isMyTurn && game.pendingWild4?.targetId === socket.id);
+    $('passTurn').classList.toggle('is-hidden', calm || !(isMyTurn && game.drawnPlayableCardId));
+    $('takePenalty').classList.toggle('is-hidden', calm || !(isMyTurn && game.pendingDraw > 0 && !game.pendingWild4));
     $('takePenalty').textContent = `Take ${game.pendingDraw}`;
     $('challengeWildFour').classList.toggle('is-hidden', !wildTarget);
     $('acceptWildFour').classList.toggle('is-hidden', !wildTarget);
   }
 
-  // The only persistent text left on the table: the swap prompt (errors use flash()).
-  function renderStatus(next) {
+  function renderStatus(view) {
     if (Date.now() < statusOverrideUntil) return;
-    const game = next.game;
+    const game = view.game;
     const el = $('tableMessage');
-    el.textContent = !game.winnerId && game.awaitingSwapPlayerId === socket.id ? 'Pick a player to swap with' : '';
+    el.textContent = !view.anim && !game.winnerId && game.awaitingSwapPlayerId === socket.id ? 'Pick a player to swap with' : '';
     el.className = 'status-line';
   }
 
-  function renderGame(next) {
-    const game = next.game;
-    flightThisRender = 0;
+  /* ------------------------------------------------------------------
+     6 Reaction — a big electric-blue, pulsing button with a draining countdown ring.
+     Last one to tap (or anyone who never taps) draws 2.
+  ------------------------------------------------------------------- */
+  let reactionTimer = null;
+  function renderReaction(game) {
+    const six = $('reactionOverlay');
+    const reaction = game?.sixReaction;
+    clearTimeout(reactionTimer);
+    if (!reaction?.active) { six.classList.add('is-hidden'); six.dataset.rid = ''; return; }
+    const now = Date.now();
+    const live = now >= reaction.startsAt;
+    const safe = reaction.pressed.includes(socket.id);
+    const stateKey = `${reaction.id}:${live ? 'live' : 'ready'}`;
+    six.classList.remove('is-hidden');
+    six.disabled = !live || safe;
+    six.classList.toggle('is-ready', !live);
+    six.classList.toggle('is-safe', safe);
+    $('sixLabel').textContent = safe ? '✓' : live ? 'TAP!' : 'READY';
+    $('reactionStatus').textContent = safe ? `${reaction.pressed.length} / ${reaction.playerIds.length} SAFE` : 'LAST ONE DRAWS 2';
+    const urgent = live && !safe && reaction.deadline - now < 1700;
+    six.classList.toggle('is-urgent', urgent);
+    if (six.dataset.rid !== stateKey) {
+      six.dataset.rid = stateKey;
+      const ring = $('sixRing');
+      ring.style.animation = 'none';
+      void ring.getBoundingClientRect();
+      if (live) {
+        ring.style.animation = `six-drain ${Math.max(200, reaction.deadline - now)}ms linear forwards`;
+        playSfx('reaction');
+      }
+    }
+    const next = !live ? reaction.startsAt - now + 20 : urgent ? 0 : reaction.deadline - 1700 - now + 20;
+    if (next > 0) reactionTimer = window.setTimeout(() => { if (curView?.game) renderReaction(curView.game); }, next);
+  }
+
+  /* ------------------------------------------------------------------
+     Effects that punctuate special cards (burst, ring, big icon, sparks)
+  ------------------------------------------------------------------- */
+  const BURST_COLORS = { red: '#ff4b3a', yellow: '#ffd51f', green: '#34e06a', blue: '#2fa8ff', wild: '#ffffff' };
+  const BURST_ICONS = {
+    Reverse: '<svg viewBox="0 0 100 100"><path d="M18 46 A32 32 0 0 1 72 24 L64 14 L90 22 L80 48 L74 38 A40 40 0 0 0 26 54Z M82 54 A32 32 0 0 1 28 76 L36 86 L10 78 L20 52 L26 62 A40 40 0 0 0 74 46Z" /></svg>',
+    Skip: '<svg viewBox="0 0 100 100"><path d="M50 8 A42 42 0 1 0 50 92 A42 42 0 1 0 50 8Z M50 24 A26 26 0 0 1 70 32 L32 70 A26 26 0 0 1 50 24Z M76 40 A26 26 0 0 1 50 76 A26 26 0 0 1 42 74Z" fill-rule="evenodd"/></svg>',
+    Draw2: '<svg viewBox="0 0 100 100"><rect x="14" y="26" width="42" height="60" rx="7" transform="rotate(-12 35 56)"/><rect x="42" y="18" width="42" height="60" rx="7" transform="rotate(10 63 48)"/></svg>',
+    Wild4: '<svg viewBox="0 0 100 100"><rect x="14" y="20" width="36" height="52" rx="6" transform="rotate(-14 32 46)"/><rect x="34" y="14" width="36" height="52" rx="6"/><rect x="52" y="24" width="36" height="52" rx="6" transform="rotate(14 70 50)"/></svg>',
+    Wild: '<svg viewBox="0 0 100 100"><path d="M50 50 L50 6 A44 44 0 0 1 94 50Z"/><path d="M50 50 L94 50 A44 44 0 0 1 50 94Z"/><path d="M50 50 L50 94 A44 44 0 0 1 6 50Z"/><path d="M50 50 L6 50 A44 44 0 0 1 50 6Z"/></svg>',
+  };
+  async function playEffect(card, colorKey) {
+    if (FAST()) return;
+    const kind = BURST_ICONS[card.value] ? card.value : 'num';
+    const host = document.querySelector('.center');
+    const el = document.createElement('div');
+    el.className = `burst burst-${kind}`;
+    el.style.setProperty('--bc', BURST_COLORS[card.color === 'wild' ? colorKey : card.color] || '#fff');
+    el.innerHTML = `<i class="burst-flash"></i><i class="burst-ring"></i><i class="burst-ring r2"></i>${kind === 'num' ? '' : `<span class="burst-icon">${BURST_ICONS[kind]}${kind === 'Draw2' ? '<b>+2</b>' : kind === 'Wild4' ? '<b>+4</b>' : ''}</span>`}`
+      + Array.from({ length: kind === 'num' ? 6 : 12 }, (_, i) => `<u class="burst-spark" style="--a:${Math.round((360 / (kind === 'num' ? 6 : 12)) * i + Math.random() * 20)}deg;--d:${70 + Math.round(Math.random() * 90)}px"></u>`).join('');
+    host.appendChild(el);
+    window.setTimeout(() => el.remove(), 1250);
+    if (kind !== 'num') playSfx('action');
+    await sleep(kind === 'num' ? 120 : 760);
+  }
+
+  /* ------------------------------------------------------------------
+     Pure rendering of a "view" (a server state, possibly rewound by the director so that
+     a transition can be shown one beat at a time).
+  ------------------------------------------------------------------- */
+  const cloneView = next => ({ ...next, players: next.players.map(p => ({ ...p })), game: { ...next.game, hand: [...(next.game.hand || [])] }, anim: false, hiddenCards: {}, hiddenHandIds: new Set() });
+
+  function resetSceneForRound(roundId) {
+    discardRound = roundId;
+    discardStack = []; lastTopId = null; lastGameSnapshot = null;
+    hoverIndex = -1; armedId = null; handView = { cards: [], els: [] };
+    $('myHand').replaceChildren();
+    for (const rec of seatEls.values()) rec.seat.remove();
+    seatEls.clear();
+  }
+
+  function renderView(view) {
+    const game = view.game;
+    curView = view;
     layoutField();
-    if (discardRound !== game.roundId) {
-      discardRound = game.roundId;
-      discardStack = []; lastTopId = null; prevCounts = new Map(); lastAnimatedCardId = null;
-      hoverIndex = -1; armedId = null; handView = { cards: [], els: [] };
-      $('myHand').replaceChildren();
-    }
-
-    // Opponent plays a card: fly it out of their fan (before seats are rebuilt).
-    const firstFrame = !lastGameSnapshot;
-    if (!firstFrame && game.lastCardId && game.lastCardId !== lastGameSnapshot.lastCardId && game.lastPlayerId && game.lastPlayerId !== socket.id && game.top) {
-      const sel = `.seat[data-player-id="${CSS.escape(game.lastPlayerId)}"]`;
-      const source = document.querySelector(`${sel} .seat-fan > .fan > .mini-card:last-child`) || document.querySelector(`${sel} .seat-avatar`);
-      if (source && layout) {
-        const rect = source.getBoundingClientRect();
-        flightThisRender = Math.max(flightThisRender, flyCard({
-          card: game.top, from: { ...centerOf(rect), w: layout.oppW * layout.s, h: layout.oppH * layout.s }, to: pileTarget(),
-          rotFrom: 0, rotTo: Math.round(discardRot(game.lastCardId) * 1.7) + 360, duration: 480, tilt: 46,
-        }));
-      }
-    }
-
-    $('gameRoomCode').textContent = next.code;
-    renderOpponents(next);
-
-    // Opponents drawing: cards travel from the deck to their avatar.
-    let anyOpponentDrew = false;
-    next.players.forEach(player => {
-      const before = prevCounts.get(player.id);
-      if (!firstFrame && before !== undefined && player.count > before && player.id !== socket.id && layout) {
-        const target = document.querySelector(`.seat[data-player-id="${CSS.escape(player.id)}"] .seat-avatar`);
-        if (target) {
-          const rect = target.getBoundingClientRect();
-          const amount = player.count - before;
-          for (let i = 0; i < Math.min(amount, 4); i += 1) {
-            flyCard({ back: true, from: drawPileSource(), to: { ...centerOf(rect), w: layout.oppW * layout.s, h: layout.oppH * layout.s }, rotTo: 0, duration: 420, delay: i * 90 });
-          }
-          seatBubble(player.id, `+${amount}`, amount >= 2 ? 'is-bad' : '');
-          anyOpponentDrew = true;
-        }
-      }
-    });
-    if (anyOpponentDrew) playSfx('draw');
-    prevCounts = new Map(next.players.map(player => [player.id, player.count]));
-
-    renderHand(next);
-
-    // Current colour tints the table rim + arrows; direction flips the arrows.
+    if (discardRound !== game.roundId) resetSceneForRound(game.roundId);
+    $('gameRoomCode').textContent = view.code;
+    renderOpponents(view);
+    renderHand(view);
     $('field').style.setProperty('--cur', COLOR_HEX[game.color] || COLOR_HEX.red);
     $('dirRing').style.setProperty('--dir', game.direction === -1 ? '-1' : '1');
     $('deckCount').textContent = String(game.drawCount);
 
-    // Discard pile — up to 7 recent cards, each with its own offset + rotation.
     const top = game.top;
     let isNewTop = false;
     if (top && top.id !== lastTopId) {
-      const seed = hashId(top.id);
-      discardStack.push({ card: top, rot: Math.round(discardRot(top.id) * 1.7), dx: ((seed >> 5) % 29) - 14, dy: ((seed >> 9) % 21) - 10 });
+      const slot = pileSlot(top);
+      discardStack.push({ card: top, ...slot });
       if (discardStack.length > 7) discardStack.shift();
       lastTopId = top.id;
       isNewTop = true;
@@ -834,36 +904,19 @@
         ring.className = 'discard-wild-ring';
         wrap.appendChild(ring);
       }
-      if (isTop && isNewTop && !firstFrame) {
-        if (flightThisRender > 0) { wrap.style.visibility = 'hidden'; window.setTimeout(() => { wrap.style.visibility = ''; }, flightThisRender - 30); }
-        else if (!prefs.reduceMotion) wrap.classList.add('is-new');
-      }
+      if (isTop && isNewTop && lastGameSnapshot && !FAST()) wrap.classList.add('is-new');
       pile.appendChild(wrap);
     });
+    $('discardPile').closest('.pile-discard').classList.toggle('is-empty', !top);
 
-    renderStatus(next);
+    renderStatus(view);
+    if (view.anim) { renderReaction(null); lastGameSnapshot = lastGameSnapshot || {}; return; }
+    renderReaction(game);
 
-    // 6 Reaction — a round button on the table, not a screen-wide overlay.
-    const reaction = game.sixReaction;
-    const six = $('reactionOverlay');
-    six.classList.toggle('is-hidden', !reaction?.active);
-    if (reaction?.active) {
-      const pressed = reaction.pressed.length;
-      const total = reaction.playerIds.length;
-      const safe = reaction.pressed.includes(socket.id);
-      $('reactionStatus').textContent = safe ? `SAFE ${pressed}/${total}` : `${pressed}/${total} SAFE`;
-      six.disabled = safe;
-      six.classList.toggle('already-pressed', safe);
-      $('reactionCountdown').textContent = String(Math.max(0, Math.ceil((reaction.deadline - Date.now()) / 1000)));
-      if (!reactionTicker) {
-        reactionTicker = window.setInterval(() => {
-          const current = state?.game?.sixReaction;
-          if (!current?.active) { clearInterval(reactionTicker); reactionTicker = null; return; }
-          $('reactionCountdown').textContent = String(Math.max(0, Math.ceil((current.deadline - Date.now()) / 1000)));
-        }, 120);
-      }
-    } else if (reactionTicker) { clearInterval(reactionTicker); reactionTicker = null; }
-
+    if (game.lastSixResult && game.lastSixResult.id !== lastSixShown) {
+      lastSixShown = game.lastSixResult.id;
+      if (lastGameSnapshot) game.lastSixResult.loserIds.forEach(id => seatBubble(id, game.lastSixResult.reason === 'last' ? 'SLOWEST!' : 'TOO SLOW!', 'is-bad'));
+    }
     if (game.unoAnnouncement && game.unoAnnouncement.id !== lastUnoAnimationId) {
       lastUnoAnimationId = game.unoAnnouncement.id;
       showUnoFx(game.unoAnnouncement.playerId);
@@ -871,17 +924,199 @@
     }
     if (game.winnerId && lastWinnerShown !== `${game.roundId}:${game.winnerId}`) {
       lastWinnerShown = `${game.roundId}:${game.winnerId}`;
-      showWinner(game.winnerId === socket.id, game.winnerName);
+      window.setTimeout(() => showWinner(game.winnerId === socket.id, game.winnerName), FAST() ? 0 : 900);
     }
     if (lastGameSnapshot && (game.lastCardId !== lastGameSnapshot.lastCardId || game.turn !== lastGameSnapshot.turn)) {
       const stage = $('wildPicker');
       if (stage.classList.contains('is-remote')) { stage.classList.add('is-hidden'); stage.classList.remove('is-remote'); }
     }
-    if (lastGameSnapshot && game.lastCardId && game.lastCardId !== lastGameSnapshot.lastCardId) {
-      playSfx(['Skip', 'Reverse', 'Draw2', 'Wild4'].includes(game.lastAction) ? 'action' : 'card');
-    }
     lastGameSnapshot = { lastCardId: game.lastCardId, lastAction: game.lastAction, turn: game.turn };
   }
+
+  /* ------------------------------------------------------------------
+     The director: turns every server state change into an ordered, slow-paced scene
+       play → impact effect → each drawn card (deck → hand, flipping face-up) → new turn.
+     Inputs are locked while it runs; a click anywhere skips to the end.
+  ------------------------------------------------------------------- */
+  let lastSixShown = null;
+
+  // A card leaves the deck, flies to its (hidden) slot and is revealed exactly where it lands.
+  function dispatchDraw(view, next, playerId, card, { duration = 720, spin = 0, flipUp = true } = {}) {
+    const isMe = playerId === socket.id;
+    let target;
+    if (isMe) {
+      view.game.hand = [...view.game.hand, card];
+      view.hiddenHandIds.add(card.id);
+      renderView(view);
+      const idx = handView.cards.findIndex(c => c.id === card.id);
+      target = handView.els[idx] ? handPoint(handView.els[idx]) : null;
+    } else {
+      view.hiddenCards[playerId] = (view.hiddenCards[playerId] || 0) + 1;
+      const p = view.players.find(q => q.id === playerId);
+      if (p) p.count += 1;
+      renderView(view);
+      const last = seatEls.get(playerId)?.fan.lastElementChild;
+      target = last ? miniPoint(last) : null;
+    }
+    playSfx('draw');
+    return flyCard({ card: isMe ? card : null, back: true, flip: isMe && flipUp ? 'toFront' : null, from: deckPoint(), to: target, duration, arc: -90, spin }).then(() => {
+      if (isMe) view.hiddenHandIds.delete(card.id);
+      else view.hiddenCards[playerId] = Math.max(0, (view.hiddenCards[playerId] || 1) - 1);
+      renderView(view);
+    });
+  }
+
+  function diffEvents(prev, next) {
+    const pg = prev.game, ng = next.game;
+    const play = ng.lastCardId && ng.lastCardId !== pg.lastCardId && ng.top ? { playerId: ng.lastPlayerId, card: ng.top } : null;
+    const swapped = Boolean(play && next.settings?.zeroSeven && ['0', '7'].includes(play.card.value));
+    const draws = [];
+    if (!swapped) {
+      const prevIds = new Set((pg.hand || []).map(c => c.id));
+      for (const p of next.players) {
+        const before = prev.players.find(q => q.id === p.id);
+        if (!before) continue;
+        const played = play && play.playerId === p.id ? 1 : 0;
+        const n = p.count - (before.count - played);
+        if (n <= 0) continue;
+        const cards = p.id === socket.id ? (ng.hand || []).filter(c => !prevIds.has(c.id)) : null;
+        draws.push({ playerId: p.id, n: cards ? cards.length : n, cards });
+      }
+    }
+    return { play, draws };
+  }
+
+  async function playEvents(prev, next, ev, chk) {
+    const pg = prev.game, ng = next.game;
+    const view = cloneView(next);
+    view.anim = true;
+    view.game.top = pg.top; view.game.color = pg.color; view.game.direction = pg.direction;
+    view.game.hand = [...(pg.hand || [])];
+    view.players.forEach(p => { const before = prev.players.find(q => q.id === p.id); if (before) { p.count = before.count; p.isTurn = before.isTurn; } });
+    renderView(view);
+
+    if (ev.play) {
+      const { playerId, card } = ev.play;
+      const me = playerId === socket.id;
+      let from = null;
+      if (me) {
+        const el = handView.els[handView.cards.findIndex(c => c.id === card.id)];
+        if (el) from = handPoint(el);
+        view.game.hand = view.game.hand.filter(c => c.id !== card.id);
+      } else {
+        const last = seatEls.get(playerId)?.fan.lastElementChild;
+        if (last) from = miniPoint(last);
+        const p = view.players.find(q => q.id === playerId);
+        if (p) p.count = Math.max(0, p.count - 1);
+      }
+      renderView(view);
+      playSfx(['Draw2', 'Wild4', 'Skip', 'Reverse'].includes(card.value) ? 'action' : 'card');
+      await flyCard({ card, back: !me, flip: me ? null : 'toFront', from, to: pilePoint(card), duration: pileFlightMs(playerId), arc: me ? -90 : -70 });
+      chk();
+      view.game.top = ng.top; view.game.color = ng.color; view.game.direction = ng.direction;
+      renderView(view);
+      await playEffect(card, ng.color);
+      chk();
+    } else {
+      view.game.color = ng.color; view.game.direction = ng.direction; view.game.top = ng.top;
+    }
+
+    for (const d of ev.draws) {
+      const anchor = d.playerId === socket.id ? $('youSeat') : seatEls.get(d.playerId)?.wrap;
+      if (d.n >= 2) floatText(anchor, `+${d.n}`, 'is-draw');
+      const list = d.cards || Array.from({ length: d.n }, (_, i) => ({ id: `ghost-${d.playerId}-${i}` }));
+      if (d.playerId === socket.id) view.game.hand = view.game.hand.filter(c => !list.some(x => x.id === c.id));
+      const flights = [];
+      for (const card of list) {
+        flights.push(dispatchDraw(view, next, d.playerId, card));
+        await sleep(430);
+        chk();
+      }
+      await Promise.all(flights);
+      chk();
+    }
+    await sleep(260);
+  }
+
+  async function dealSequence(next, chk) {
+    const ng = next.game;
+    const view = cloneView(next);
+    view.anim = true;
+    view.game.top = null; view.game.hand = [];
+    view.players.forEach(p => { p.count = 0; p.isTurn = false; });
+    const deck = document.querySelector('.pile-draw');
+    deck.classList.add('deck-center');
+    renderView(view);
+    await sleep(1000); chk();
+    const flights = [];
+    const mine = [...(ng.hand || [])];
+    const perPlayer = mine.length || 7;
+    for (let round = 0; round < perPlayer; round += 1) {
+      for (const p of next.players) {
+        const card = p.id === socket.id ? mine[round] : { id: `deal-${p.id}-${round}` };
+        flights.push(dispatchDraw(view, next, p.id, card, { duration: 680, spin: p.id === socket.id ? 0 : 160 }));
+        await sleep(90);
+        chk();
+      }
+    }
+    await Promise.all(flights); chk();
+    await sleep(250);
+    if (ng.top) {
+      playSfx('card');
+      await flyCard({ card: ng.top, back: true, flip: 'toFront', from: deckPoint(), to: pilePoint(ng.top), duration: 820, arc: -60 });
+      chk();
+      view.game.top = ng.top; view.game.color = ng.color; view.game.direction = ng.direction;
+      renderView(view);
+    }
+    deck.classList.remove('deck-center');
+    await sleep(900);
+  }
+
+  async function transition(prev, next, backlog, gen) {
+    const chk = () => { if (gen !== director.gen) throw ABORT; };
+    const ng = next.game;
+    if (!prev || prev.game.roundId !== ng.roundId) {
+      resetSceneForRound(ng.roundId);
+      if (!ng.lastCardId && !FAST() && backlog < 2) await dealSequence(next, chk);
+      return;
+    }
+    if (FAST() || backlog >= 3) return;
+    const ev = diffEvents(prev, next);
+    if (!ev.play && !ev.draws.length) return;
+    await playEvents(prev, next, ev, chk);
+  }
+
+  async function pump() {
+    if (director.running) return;
+    director.running = true;
+    const gen = director.gen;
+    try {
+      while (director.queue.length && gen === director.gen) {
+        const next = director.queue.shift();
+        try { await transition(director.shown, next, director.queue.length, gen); }
+        catch (error) { if (error !== ABORT) console.error(error); }
+        if (gen !== director.gen) break;
+        renderView(cloneView(next));
+        director.shown = next;
+      }
+    } finally {
+      if (gen === director.gen) { director.running = false; director.skip = false; }
+    }
+  }
+  window.__unoDirector = director; // read-only handle for debugging / automated tests
+  director.enqueue = next => { director.queue.push(next); pump(); };
+  director.reset = () => {
+    director.gen += 1; director.queue = []; director.running = false; director.skip = false; director.shown = null;
+    director.anims.forEach(a => { try { a.cancel(); } catch { /* ignore */ } });
+    director.anims.clear();
+    $('cardFlightLayer').replaceChildren();
+    document.querySelector('.pile-draw')?.classList.remove('deck-center');
+  };
+  director.fastForward = () => {
+    if (!director.running) return;
+    director.skip = true;
+    director.anims.forEach(a => { try { a.finish(); } catch { /* ignore */ } });
+  };
 
   // 3D "UNO!" lying on the table in front of the caller, upright from THEIR point of view
   // (everyone sees the same thing, so it is upside-down/sideways for people seated elsewhere).
@@ -894,7 +1129,7 @@
       const hand = $('myHand').getBoundingClientRect();
       from = { x: hand.left + hand.width * HAND_CENTER, y: hand.bottom - layout.handH * layout.s * 0.6 };
     } else {
-      const avatar = document.querySelector(`.seat[data-player-id="${CSS.escape(callerId)}"] .seat-avatar`);
+      const avatar = seatEls.get(callerId)?.avatar;
       if (!avatar) return;
       from = centerOf(avatar.getBoundingClientRect());
     }
@@ -941,8 +1176,12 @@
     if (next.started && next.game) {
       closeModal('roomSetupModal');
       showScreen('gameScreen');
-      renderGame(next);
+      director.enqueue(next);
     } else {
+      director.reset();
+      curView = null;
+      for (const rec of seatEls.values()) rec.seat.remove();
+      seatEls.clear();
       $('winOverlay').classList.add('is-hidden');
       lastWinnerShown = null;
       lastGameSnapshot = null;
@@ -1056,17 +1295,18 @@
   });
 
   $('drawPile').addEventListener('click', () => {
+    if (director.running) return;
     if (!state?.game) return;
     if (state.game.pendingDraw > 0) socket.emit('drawPenalty');
     else socket.emit('drawCard');
     playSfx('draw');
   });
-  $('passTurn').addEventListener('click', () => socket.emit('passTurn'));
-  $('takePenalty').addEventListener('click', () => socket.emit('drawPenalty'));
+  $('passTurn').addEventListener('click', () => { if (!director.running) socket.emit('passTurn'); });
+  $('takePenalty').addEventListener('click', () => { if (!director.running) socket.emit('drawPenalty'); });
   $('unoButton').addEventListener('click', () => { socket.emit('callUno'); playSfx('uno'); });
   $('challengeWildFour').addEventListener('click', () => { socket.emit('challengeWild4'); playSfx('action'); });
   $('acceptWildFour').addEventListener('click', () => { socket.emit('drawPenalty'); playSfx('draw'); });
-  $('reactionOverlay').addEventListener('click', () => { if (state?.game?.sixReaction?.active) socket.emit('pressSix', state.game.sixReaction.id); playSfx('reaction'); });
+  $('reactionOverlay').addEventListener('click', () => { const r = state?.game?.sixReaction; if (r?.active && Date.now() >= r.startsAt - 100) { socket.emit('pressSix', r.id); playSfx('click'); } });
   (() => {
     const depth = $('wheelDepth');
     for (let i = 0; i < 14; i += 1) { const layer = document.createElement('i'); layer.style.setProperty('--i', String(i)); depth.appendChild(layer); }
@@ -1129,6 +1369,9 @@
     state = null; roomCode = ''; lastWinnerShown = null;
     showScreen('mainMenu');
   });
+
+  // Click anywhere to skip the current animation sequence.
+  document.addEventListener('pointerdown', () => director.fastForward(), true);
 
   // Hand interaction: hover is resolved from layout (hitTestHand), clicks use the same hit-test.
   (() => {

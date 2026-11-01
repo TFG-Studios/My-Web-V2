@@ -59,3 +59,9 @@
 - Seat-based opponent fans (row / diagonal) from one generic renderer, with mirrored reflections; character avatars, coloured nameplates, white card-count badges; active player glows gold.
 - Draw deck: thick 3D stack at upper-left, own clickable area. Discard: up to 7 layered cards. Big curved opposing arrows that flip with direction.
 - Player hand: dynamic curved fan, layout-based hover (no flicker). Contextual UNO button, metallic gear; Leave moved into Settings; room code / YOUR TURN / back button removed from the table.
+
+## V8 — real-card motion + fixes
+- Animation director: every server update is played as an ordered scene (play → impact effect → each drawn card → new turn). Inputs lock while it runs; click anywhere to skip. Fixes the +2 "teleport" (play, draws and turn change used to be shown in one frame, and seats were rebuilt from scratch).
+- Cards are 2-sided 3D objects: arcing flights, tilt from table plane, mid-air flip (draw → hand turns face-up, opponent plays turn face-up), exact landing in the reserved hand slot. Deal-in at round start (deck in the centre, one card at a time), then the deck glides to its corner.
+- Persistent seats/fans (cards move instead of popping), slap on landing, burst effects for Skip / Reverse / +2 / Wild / +4, floating "+N" on the victim.
+- 6 reaction: last tapper now draws 2 (and anyone who never taps), GO-moment lead-in with false-start guard, new electric-blue pulsing button with draining ring and shockwaves, ✓ badges on tapped players, "SLOWEST!" callout. Added test/six-reaction.test.js (needs socket.io-client).

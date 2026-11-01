@@ -15,7 +15,8 @@ const rooms = new Map();
 const ROOM_CAPACITY = 5;
 const DISCONNECT_GRACE_MS = 60_000;
 const UNO_CATCH_MS = 6_000;
-const REACTION_MS = 4_000;
+const REACTION_MS = 4_500;
+const REACTION_LEAD_MS = 1_400; // clients finish the play animation before the countdown starts
 const AUTO_SKIP_MS = 10_000;
 const VALID_SETTINGS = Object.keys(engine.DEFAULT_SETTINGS);
 
@@ -125,10 +126,12 @@ function publicState(room, viewerId) {
       sixReaction: game.sixReaction ? {
         id: game.sixReaction.id,
         active: game.sixReaction.active,
+        startsAt: game.sixReaction.startsAt,
         deadline: game.sixReaction.deadline,
         pressed: [...game.sixReaction.pressed],
         playerIds: [...game.sixReaction.playerIds],
       } : null,
+      lastSixResult: game.lastSixResult || null,
     } : null,
   };
 }
@@ -222,36 +225,47 @@ function startSixReaction(room) {
   if (!game || !game.settings.sixReaction || game.winnerId) return;
   clearTimer(room, 'reaction');
   const id = randomUUID();
+  const startsAt = Date.now() + REACTION_LEAD_MS;
   game.sixReaction = {
     id,
     active: true,
     playerIds: room.players.map(player => player.id),
     pressed: [],
-    deadline: Date.now() + REACTION_MS,
+    startsAt,
+    deadline: startsAt + REACTION_MS,
   };
   notice(room, '6 REACTION! Tap your button before the timer runs out!', 'reaction');
   sendState(room);
   room.timers.reaction = setTimeout(() => {
     if (!room.game?.sixReaction || room.game.sixReaction.id !== id) return;
     finishSixReaction(room);
-  }, REACTION_MS);
+  }, REACTION_LEAD_MS + REACTION_MS);
 }
 
 function finishSixReaction(room) {
   const game = room.game;
   if (!game?.sixReaction) return;
-  const missed = game.sixReaction.playerIds.filter(id => !game.sixReaction.pressed.includes(id));
+  const reaction = game.sixReaction;
+  // Anyone who never tapped is punished. If EVERYONE tapped, the slowest (last) tapper is punished.
+  let losers = reaction.playerIds.filter(id => !reaction.pressed.includes(id));
+  let reason = 'missed';
+  if (!losers.length && reaction.pressed.length) {
+    losers = [reaction.pressed[reaction.pressed.length - 1]];
+    reason = 'last';
+  }
   const names = [];
-  for (const id of missed) {
+  const loserIds = [];
+  for (const id of losers) {
     const index = playerIndex(room, id);
     if (index >= 0 && !game.winnerId) {
       drawIntoHand(game, index, 2);
       names.push(room.players[index].name);
+      loserIds.push(id);
     }
   }
+  game.lastSixResult = { id: reaction.id, loserIds, reason };
   cancelReaction(room);
-  if (names.length) notice(room, `${names.join(', ')} missed the 6 reaction and draw 2 cards.`, 'penalty');
-  else notice(room, 'Perfect timing — everyone was safe!', 'success');
+  if (names.length) notice(room, `${names.join(', ')} ${reason === 'last' ? 'was the slowest' : 'missed the 6 reaction'} and draws 2 cards.`, 'penalty');
   sendState(room);
 }
 
@@ -769,6 +783,7 @@ io.on('connection', socket => {
     const reaction = room?.game?.sixReaction;
     if (!room || !reaction || !reaction.active || reaction.id !== reactionId) return;
     if (!reaction.playerIds.includes(socket.id) || reaction.pressed.includes(socket.id)) return;
+    if (Date.now() < reaction.startsAt - 150) return; // false start: ignored until the GO moment
     reaction.pressed.push(socket.id);
     if (reaction.pressed.length === reaction.playerIds.length) finishSixReaction(room);
     else sendState(room);
@@ -820,4 +835,4 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`My-Web UNO V2 listening on http://localhost:${PORT}`);
 });
 
-module.exports = { app, server, rooms };
+module.exports = { app, server, rooms, sendState };
