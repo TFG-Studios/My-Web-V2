@@ -5,6 +5,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 process.env.PORT = '0';
+process.env.UNO_SIX_FAILSAFE_MS = '1200'; // shorten the hidden safety net for the test
 let client;
 try { client = require('socket.io-client'); } catch { client = null; }
 const { server, rooms } = require('../server');
@@ -44,7 +45,7 @@ test('6 reaction: everyone taps → the last tapper draws 2', { skip: !client },
   if (!server.listening) await new Promise(resolve => server.listen(0, resolve));
   const { sockets, room, game } = await setup(3);
   const before = counts(game);
-  await wait(1500); // wait for the GO moment
+  await wait(2400); // wait for the GO moment
   const order = [2, 0, 1]; // player 1 taps last
   for (const i of order) { sockets[i].emit('pressSix', game.sixReaction.id); await wait(40); }
   await wait(150);
@@ -60,10 +61,10 @@ test('6 reaction: a player who never taps draws 2', { skip: !client }, async () 
   if (!server.listening) await new Promise(resolve => server.listen(0, resolve));
   const { sockets, room, game } = await setup(3);
   const before = counts(game);
-  await wait(1500);
+  await wait(2400);
   sockets[0].emit('pressSix', game.sixReaction.id);
   sockets[2].emit('pressSix', game.sixReaction.id);
-  await wait(5200); // let the timer expire
+  await wait(1600); // the hidden safety net expires
   const after = counts(game);
   assert.deepEqual(game.lastSixResult.loserIds, [room.players[1].id]);
   assert.equal(game.lastSixResult.reason, 'missed');

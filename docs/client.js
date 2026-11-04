@@ -39,6 +39,18 @@
   let flashTimer = null;
   let leaveTimer = null;
   let lastPointerType = 'mouse';
+  let pendingWildKind = 'wild';
+  let clockOffset = 0;
+  const clockSamples = [];
+  let sixGoTimer = null;
+  // Server time, estimated from the freshest low-latency sample (fixes tap windows on devices whose clocks differ).
+  const srvNow = () => Date.now() + clockOffset;
+  function syncClock(serverNow) {
+    if (typeof serverNow !== 'number') return;
+    clockSamples.push(serverNow - Date.now());
+    if (clockSamples.length > 10) clockSamples.shift();
+    clockOffset = Math.max(...clockSamples);
+  }
   let prefs = loadPrefs();
 
   function makeToken() {
@@ -161,9 +173,13 @@
     else if (audioContext && !musicTicker) startMusic();
   }
 
-  function cardFile(card) {
+  const WILD_SUFFIX = { red: 'R', yellow: 'Y', green: 'G', blue: 'B' };
+  function cardFile(card, wildColor) {
     if (!card) return null;
-    if (card.color === 'wild') return card.value === 'Wild4' ? 'W4.png' : 'WC.png';
+    if (card.color === 'wild') {
+      const base = card.value === 'Wild4' ? 'W4' : 'WC';
+      return WILD_SUFFIX[wildColor] ? `${base}_${WILD_SUFFIX[wildColor]}.png` : `${base}.png`;
+    }
     const prefix = LETTERS[card.color];
     if (!prefix) return null;
     const value = card.value === 'Skip' ? 'S' : card.value === 'Reverse' ? 'R' : card.value === 'Draw2' ? 'A2' : card.value;
@@ -194,7 +210,7 @@
       // Mouse/touch are handled by the hand container (see hitTestHand); this only serves keyboard activation.
       el.addEventListener('click', event => { if (event.detail === 0) onCardChosen(card, el); });
     }
-    const filename = cardFile(card);
+    const filename = cardFile(card, options.wildColor);
     if (filename) {
       const image = document.createElement('img');
       image.className = 'card-face-image';
@@ -434,6 +450,7 @@
     hoverIndex = -1; armedId = null;
     if (card.color === 'wild') {
       pendingWildCardId = card.id;
+      pendingWildKind = card.value === 'Wild4' ? 'wild4' : 'wild';
       openWildWheel();
       playSfx('click');
       applyHandTransforms();
@@ -445,7 +462,9 @@
   function openWildWheel() {
     const stage = $('wildPicker');
     stage.classList.remove('is-hidden', 'is-remote');
-    socket.emit('wildPicking', { active: true });
+    stage.classList.toggle('is-wild4', pendingWildKind === 'wild4');
+    stage.style.animation = 'none'; void stage.offsetWidth; stage.style.animation = '';
+    socket.emit('wildPicking', { active: true, kind: pendingWildKind });
   }
   function closeWildWheel() {
     const stage = $('wildPicker');
@@ -801,30 +820,33 @@
     const reaction = game?.sixReaction;
     clearTimeout(reactionTimer);
     if (!reaction?.active) { six.classList.add('is-hidden'); six.dataset.rid = ''; return; }
-    const now = Date.now();
-    const live = now >= reaction.startsAt;
+    const now = srvNow();
+    const go = now >= reaction.startsAt;
     const safe = reaction.pressed.includes(socket.id);
-    const stateKey = `${reaction.id}:${live ? 'live' : 'ready'}`;
     six.classList.remove('is-hidden');
-    six.disabled = !live || safe;
-    six.classList.toggle('is-ready', !live);
-    six.classList.toggle('is-safe', safe);
-    $('sixLabel').textContent = safe ? '✓' : live ? 'TAP!' : 'READY';
-    $('reactionStatus').textContent = safe ? `${reaction.pressed.length} / ${reaction.playerIds.length} SAFE` : 'LAST ONE DRAWS 2';
-    const urgent = live && !safe && reaction.deadline - now < 1700;
-    six.classList.toggle('is-urgent', urgent);
-    if (six.dataset.rid !== stateKey) {
-      six.dataset.rid = stateKey;
+    if (six.dataset.rid !== reaction.id) {
+      six.dataset.rid = reaction.id;
+      six.classList.remove('is-appear');
+      void six.offsetWidth;
+      six.classList.add('is-appear');
+      window.setTimeout(() => six.classList.remove('is-appear'), 700);
       const ring = $('sixRing');
       ring.style.animation = 'none';
       void ring.getBoundingClientRect();
-      if (live) {
-        ring.style.animation = `six-drain ${Math.max(200, reaction.deadline - now)}ms linear forwards`;
-        playSfx('reaction');
-      }
+      if (!go) ring.style.animation = `six-charge ${Math.max(150, reaction.startsAt - now)}ms linear forwards`;
     }
-    const next = !live ? reaction.startsAt - now + 20 : urgent ? 0 : reaction.deadline - 1700 - now + 20;
-    if (next > 0) reactionTimer = window.setTimeout(() => { if (curView?.game) renderReaction(curView.game); }, next);
+    six.disabled = !go || safe;
+    six.classList.toggle('is-lock', !go);
+    six.classList.toggle('is-go', go && !safe);
+    six.classList.toggle('is-safe', safe);
+    $('sixLabel').textContent = safe ? '✓' : '6';
+    if (go && six.dataset.go !== reaction.id) {
+      six.dataset.go = reaction.id;
+      playSfx('reaction');
+      six.classList.add('is-flash');
+      window.setTimeout(() => six.classList.remove('is-flash'), 650);
+    }
+    if (!go) reactionTimer = window.setTimeout(() => { if (curView?.game) renderReaction(curView.game); }, reaction.startsAt - now + 20);
   }
 
   /* ------------------------------------------------------------------
@@ -839,7 +861,7 @@
     Wild: '<svg viewBox="0 0 100 100"><path d="M50 50 L50 6 A44 44 0 0 1 94 50Z"/><path d="M50 50 L94 50 A44 44 0 0 1 50 94Z"/><path d="M50 50 L50 94 A44 44 0 0 1 6 50Z"/><path d="M50 50 L6 50 A44 44 0 0 1 50 6Z"/></svg>',
   };
   async function playEffect(card, colorKey) {
-    if (FAST()) return;
+    if (FAST() || card.color === 'wild') return;
     const kind = BURST_ICONS[card.value] ? card.value : 'num';
     const host = document.querySelector('.center');
     const el = document.createElement('div');
@@ -884,7 +906,7 @@
     let isNewTop = false;
     if (top && top.id !== lastTopId) {
       const slot = pileSlot(top);
-      discardStack.push({ card: top, ...slot });
+      discardStack.push({ card: top, ...slot, wildColor: top.color === 'wild' && !view.anim ? game.color : null });
       if (discardStack.length > 7) discardStack.shift();
       lastTopId = top.id;
       isNewTop = true;
@@ -896,14 +918,9 @@
       const isTop = index === discardStack.length - 1;
       wrap.className = `discard-card${isTop ? ' is-top' : ''}`;
       wrap.style.transform = `translate(${entry.dx}px, ${entry.dy}px) rotate(${entry.rot}deg)`;
-      const cardEl = createCardElement(entry.card);
+      const cardEl = createCardElement(entry.card, { wildColor: entry.wildColor });
       if (!isTop) cardEl.style.filter = `brightness(${(0.72 + 0.28 * (index / Math.max(1, discardStack.length - 1))).toFixed(2)})`;
       wrap.appendChild(cardEl);
-      if (isTop && entry.card.color === 'wild') {
-        const ring = document.createElement('i');
-        ring.className = 'discard-wild-ring';
-        wrap.appendChild(ring);
-      }
       if (isTop && isNewTop && lastGameSnapshot && !FAST()) wrap.classList.add('is-new');
       pile.appendChild(wrap);
     });
@@ -940,8 +957,8 @@
   ------------------------------------------------------------------- */
   let lastSixShown = null;
 
-  // A card leaves the deck, flies to its (hidden) slot and is revealed exactly where it lands.
-  function dispatchDraw(view, next, playerId, card, { duration = 720, spin = 0, flipUp = true } = {}) {
+  // A card leaves a source (the deck by default), flies to its (hidden) slot and is revealed exactly where it lands.
+  function dispatchDraw(view, next, playerId, card, { duration = 720, spin = 0, flipUp = true, from = null } = {}) {
     const isMe = playerId === socket.id;
     let target;
     if (isMe) {
@@ -959,7 +976,7 @@
       target = last ? miniPoint(last) : null;
     }
     playSfx('draw');
-    return flyCard({ card: isMe ? card : null, back: true, flip: isMe && flipUp ? 'toFront' : null, from: deckPoint(), to: target, duration, arc: -90, spin }).then(() => {
+    return flyCard({ card: isMe ? card : null, back: true, flip: isMe && flipUp ? 'toFront' : null, from: from || deckPoint(), to: target, duration, arc: -90, spin }).then(() => {
       if (isMe) view.hiddenHandIds.delete(card.id);
       else view.hiddenCards[playerId] = Math.max(0, (view.hiddenCards[playerId] || 1) - 1);
       renderView(view);
@@ -969,9 +986,16 @@
   function diffEvents(prev, next) {
     const pg = prev.game, ng = next.game;
     const play = ng.lastCardId && ng.lastCardId !== pg.lastCardId && ng.top ? { playerId: ng.lastPlayerId, card: ng.top } : null;
-    const swapped = Boolean(play && next.settings?.zeroSeven && ['0', '7'].includes(play.card.value));
+    // 7 → two players trade hands; 0 → every hand moves one seat in the direction of play.
+    let moves = null;
+    if (ng.lastSwap && ng.lastSwap.id !== pg.lastSwap?.id) moves = [{ from: ng.lastSwap.a, to: ng.lastSwap.b }, { from: ng.lastSwap.b, to: ng.lastSwap.a }];
+    else if (ng.lastRotate && ng.lastRotate.id !== pg.lastRotate?.id) {
+      const ids = next.players.map(p => p.id);
+      moves = ids.map((id, i) => ({ from: id, to: ids[(i + ng.lastRotate.direction + ids.length) % ids.length] }));
+    }
+    const penalty = Boolean((play && ['Draw2', 'Wild4'].includes(String(play.card.value))) || pg.pendingDraw > 0 || pg.pendingWild4);
     const draws = [];
-    if (!swapped) {
+    if (!moves) {
       const prevIds = new Set((pg.hand || []).map(c => c.id));
       for (const p of next.players) {
         const before = prev.players.find(q => q.id === p.id);
@@ -980,10 +1004,78 @@
         const n = p.count - (before.count - played);
         if (n <= 0) continue;
         const cards = p.id === socket.id ? (ng.hand || []).filter(c => !prevIds.has(c.id)) : null;
-        draws.push({ playerId: p.id, n: cards ? cards.length : n, cards });
+        draws.push({ playerId: p.id, n: cards ? cards.length : n, cards, penalty });
       }
     }
-    return { play, draws };
+    return { play, draws, moves };
+  }
+
+  const seatStackPoint = playerId => {
+    if (playerId === socket.id) {
+      const r = $('myHand').getBoundingClientRect();
+      return { x: r.left + r.width * HAND_CENTER, y: r.bottom - (layout.pad + layout.handH * 0.5) * layout.s, w: layout.handW * layout.s * 0.8, h: layout.handH * layout.s * 0.8, rot: 0, tilt: 0 };
+    }
+    const rec = seatEls.get(playerId);
+    return { ...centerOf(rec.wrap.getBoundingClientRect()), w: layout.oppW * layout.s, h: layout.oppH * layout.s, rot: 0, tilt: 0 };
+  };
+
+  // OG-style trade: every hand is gathered into a stack, stacks glide to their new owners, then spread into a fan.
+  async function handoverScene(view, next, moves, chk) {
+    const stackPts = new Map(moves.map(m => [m.from, seatStackPoint(m.from)]));
+    const gather = [];
+    for (const m of moves) {
+      const pt = stackPts.get(m.from);
+      if (m.from === socket.id) {
+        handView.els.forEach((el, i) => gather.push(flyCard({ card: handView.cards[i], flip: 'toBack', from: handPoint(el), to: pt, duration: 520, delay: i * 30, arc: -24 })));
+        view.game.hand = [];
+      } else {
+        [...(seatEls.get(m.from)?.fan.children || [])].forEach((el, i) => gather.push(flyCard({ back: true, from: miniPoint(el), to: pt, duration: 520, delay: i * 30, arc: -18 })));
+        const p = view.players.find(q => q.id === m.from);
+        if (p) p.count = 0;
+      }
+    }
+    playSfx('card');
+    renderView(view);
+    await Promise.all(gather); chk();
+    await sleep(140); chk();
+    const travel = [];
+    moves.forEach((m, k) => {
+      const from = stackPts.get(m.from), to = stackPts.get(m.to);
+      for (let layer = 0; layer < 4; layer += 1) {
+        travel.push(flyCard({ back: true, from: { ...from, x: from.x + layer * 1.6, y: from.y - layer * 2.4 }, to: { ...to, x: to.x + layer * 1.6, y: to.y - layer * 2.4 }, duration: 950, delay: layer * 30, arc: k % 2 ? 80 : -100, spin: k % 2 ? -12 : 10 }));
+      }
+    });
+    playSfx('action');
+    await Promise.all(travel); chk();
+    await sleep(100); chk();
+    const spreads = moves.map(m => (async () => {
+      const dest = next.players.find(q => q.id === m.to);
+      const list = m.to === socket.id ? [...(next.game.hand || [])] : Array.from({ length: dest?.count || 0 }, (_, i) => ({ id: `spread-${m.to}-${i}` }));
+      const flights = [];
+      for (const card of list) { flights.push(dispatchDraw(view, next, m.to, card, { from: stackPts.get(m.to), duration: 640 })); await sleep(55); chk(); }
+      await Promise.all(flights);
+    })());
+    await Promise.all(spreads); chk();
+  }
+
+  // Wild card: it lands as its black face; once a colour is chosen the matching sprite fades in with a soft light sweep.
+  async function recolorTop(color, view) {
+    const entry = discardStack[discardStack.length - 1];
+    const cardEl = document.querySelector('#discardPile .discard-card.is-top .playing-card');
+    if (entry && cardEl && !FAST()) {
+      const img = document.createElement('img');
+      img.className = 'recolor-img';
+      img.src = `/cards/${cardFile(entry.card, color)}`;
+      img.alt = ''; img.draggable = false;
+      const glow = document.createElement('i');
+      glow.className = 'recolor-glow';
+      cardEl.append(img, glow);
+      playSfx('action');
+      await sleep(760);
+    }
+    if (entry) entry.wildColor = color;
+    view.game.color = color;
+    renderView(view);
   }
 
   async function playEvents(prev, next, ev, chk) {
@@ -998,6 +1090,8 @@
     if (ev.play) {
       const { playerId, card } = ev.play;
       const me = playerId === socket.id;
+      const isWild = card.color === 'wild';
+      if (isWild) { const stage = $('wildPicker'); stage.classList.add('is-hidden'); stage.classList.remove('is-remote'); }
       let from = null;
       if (me) {
         const el = handView.els[handView.cards.findIndex(c => c.id === card.id)];
@@ -1013,17 +1107,24 @@
       playSfx(['Draw2', 'Wild4', 'Skip', 'Reverse'].includes(card.value) ? 'action' : 'card');
       await flyCard({ card, back: !me, flip: me ? null : 'toFront', from, to: pilePoint(card), duration: pileFlightMs(playerId), arc: me ? -90 : -70 });
       chk();
-      view.game.top = ng.top; view.game.color = ng.color; view.game.direction = ng.direction;
+      view.game.top = ng.top; view.game.direction = ng.direction;
+      if (!isWild) view.game.color = ng.color;
       renderView(view);
-      await playEffect(card, ng.color);
+      if (isWild) { await sleep(420); chk(); await recolorTop(ng.color, view); }
+      else await playEffect(card, ng.color);
       chk();
     } else {
       view.game.color = ng.color; view.game.direction = ng.direction; view.game.top = ng.top;
     }
 
+    if (ev.moves) {
+      await sleep(250); chk();
+      await handoverScene(view, next, ev.moves, chk);
+    }
+
     for (const d of ev.draws) {
       const anchor = d.playerId === socket.id ? $('youSeat') : seatEls.get(d.playerId)?.wrap;
-      if (d.n >= 2) floatText(anchor, `+${d.n}`, 'is-draw');
+      if (d.penalty && d.n >= 2) floatText(anchor, `+${d.n}`, 'is-draw');
       const list = d.cards || Array.from({ length: d.n }, (_, i) => ({ id: `ghost-${d.playerId}-${i}` }));
       if (d.playerId === socket.id) view.game.hand = view.game.hand.filter(c => !list.some(x => x.id === c.id));
       const flights = [];
@@ -1082,7 +1183,7 @@
     }
     if (FAST() || backlog >= 3) return;
     const ev = diffEvents(prev, next);
-    if (!ev.play && !ev.draws.length) return;
+    if (!ev.play && !ev.draws.length && !ev.moves) return;
     await playEvents(prev, next, ev, chk);
   }
 
@@ -1170,6 +1271,7 @@
   }
 
   function applyState(next) {
+    syncClock(next.serverNow);
     const wasStarted = Boolean(state?.started);
     state = next;
     roomCode = next.code || roomCode;
@@ -1177,6 +1279,10 @@
       closeModal('roomSetupModal');
       showScreen('gameScreen');
       director.enqueue(next);
+      clearTimeout(sixGoTimer);
+      const six = next.game.sixReaction;
+      // At the GO moment everyone's tap window opens together: finish any animation still running so the button is live.
+      if (six?.active) sixGoTimer = window.setTimeout(() => director.fastForward(), Math.max(0, six.startsAt - srvNow()) + 40);
     } else {
       director.reset();
       curView = null;
@@ -1306,12 +1412,15 @@
   $('unoButton').addEventListener('click', () => { socket.emit('callUno'); playSfx('uno'); });
   $('challengeWildFour').addEventListener('click', () => { socket.emit('challengeWild4'); playSfx('action'); });
   $('acceptWildFour').addEventListener('click', () => { socket.emit('drawPenalty'); playSfx('draw'); });
-  $('reactionOverlay').addEventListener('click', () => { const r = state?.game?.sixReaction; if (r?.active && Date.now() >= r.startsAt - 100) { socket.emit('pressSix', r.id); playSfx('click'); } });
+  $('reactionOverlay').addEventListener('click', () => { const r = state?.game?.sixReaction; if (r?.active && srvNow() >= r.startsAt) { socket.emit('pressSix', r.id); playSfx('click'); } });
   (() => {
+    document.querySelectorAll('.cube').forEach(cube => {
+      cube.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); cube.click(); } });
+    });
     const depth = $('wheelDepth');
     for (let i = 0; i < 14; i += 1) { const layer = document.createElement('i'); layer.style.setProperty('--i', String(i)); depth.appendChild(layer); }
-    document.querySelectorAll('.wheel-slice').forEach(slice => {
-      const tell = color => { if (!$('wildPicker').classList.contains('is-remote')) socket.emit('wildPicking', { active: true, hover: color }); };
+    document.querySelectorAll('.wheel-slice, .cube').forEach(slice => {
+      const tell = color => { if (!$('wildPicker').classList.contains('is-remote')) socket.emit('wildPicking', { active: true, hover: color, kind: pendingWildKind }); };
       slice.addEventListener('pointerenter', () => tell(slice.dataset.wildColor));
       slice.addEventListener('pointerleave', () => tell(null));
     });
@@ -1350,11 +1459,14 @@
     if (!data || data.playerId === socket.id) return;
     const stage = $('wildPicker');
     if (!data.active) { stage.classList.add('is-hidden'); stage.classList.remove('is-remote'); return; }
+    if (stage.classList.contains('is-hidden')) { stage.style.animation = 'none'; void stage.offsetWidth; stage.style.animation = ''; }
     stage.classList.remove('is-hidden');
     stage.classList.add('is-remote');
-    stage.querySelectorAll('.wheel-slice').forEach(slice => slice.classList.toggle('is-hover', slice.dataset.wildColor === data.hover));
+    stage.classList.toggle('is-wild4', data.kind === 'wild4');
+    stage.querySelectorAll('[data-wild-color]').forEach(slice => slice.classList.toggle('is-hover', slice.dataset.wildColor === data.hover));
   });
   $('cancelWild').addEventListener('click', () => { pendingWildCardId = null; closeWildWheel(); });
+  $('cancelWild4').addEventListener('click', () => { pendingWildCardId = null; closeWildWheel(); });
   document.querySelectorAll('[data-wild-color]').forEach(button => button.addEventListener('click', () => {
     const color = button.dataset.wildColor;
     const cardId = pendingWildCardId;

@@ -244,7 +244,7 @@
 }
 .wheel-depth, .wheel-face { position: absolute; inset: 0; transform-style: preserve-3d; }
 .wheel-depth i {
-  position: absolute; inset: 0; border-radius: 50%; transform: translateZ(calc(var(--i) * -2.2px));
+  position: absolute; inset: 0; border-radius: 50%; transform: translateZ(calc(var(--i) * var(--wz) * -1));
   background: conic-gradient(from 0deg, transparent 0deg 3deg, #a87300 3deg 87deg, transparent 87deg 93deg, #0b6d33 93deg 177deg, transparent 177deg 183deg, #0d4f91 183deg 267deg, transparent 267deg 273deg, #9c101f 273deg 357deg, transparent 357deg 363deg);
 }
 .slice-yellow { --c: #ffd51f; --wedge: polygon(50% 50%, 52.62% 0.07%, 57.82% 0.62%, 62.94% 1.70%, 67.92% 3.32%, 72.70% 5.45%, 77.23% 8.07%, 81.47% 11.14%, 85.36% 14.64%, 88.86% 18.53%, 91.93% 22.77%, 94.55% 27.30%, 96.68% 32.08%, 98.30% 37.06%, 99.38% 42.18%, 99.93% 47.38%); }
@@ -264,11 +264,6 @@
 }
 .wild-stage.is-remote .wheel-slice, .wild-stage.is-remote .wheel-cancel { pointer-events: none; }
 .wild-stage.is-remote .wheel-cancel { opacity: 0; }
-@keyframes wheel-in { from { opacity: 0; transform: translateY(46px) scale(.3); } to { opacity: 1; transform: none; } }
-@keyframes wheel-bob {
-  0%, 100% { transform: perspective(900px) rotateX(50deg) rotateZ(-3deg) translateZ(0); }
-  50% { transform: perspective(900px) rotateX(55deg) rotateZ(3deg) translateZ(14px); }
-}
 
 
 /* ----- UNO! effect: lies on the table in front of whoever called it, upright for THEM ----- */
@@ -361,32 +356,90 @@
 @keyframes burst-spark { 0% { opacity: 1; transform: rotate(var(--a)) translateY(0) scaleY(.6); } 100% { opacity: 0; transform: rotate(var(--a)) translateY(calc(var(--d) * -1.7)) scaleY(1.4); } }
 @keyframes spin-half { from { transform: rotate(-200deg); } to { transform: rotate(0); } }
 
-/* 6 reaction: loud electric blue (nothing else on the table is blue-white), shockwaves, draining ring */
-.six-button {
-  position: absolute; z-index: 30; left: 0; top: 0; display: grid; place-items: center; align-content: center; width: 200px; height: 200px; padding: 0; border: 0; border-radius: 50%;
-  transform: translate(-50%, -50%); color: #fff; cursor: pointer;
-  background: radial-gradient(circle at 35% 28%, #c4f8ff 0, #1fc8ff 30%, #0a68ff 70%, #052f9e 100%);
-  box-shadow: 0 0 0 7px #fff, 0 0 0 11px #0a3fbf, 0 0 56px 16px #1fc8ffcc, 0 18px 30px #000a; animation: six-pulse .45s ease-in-out infinite alternate;
-}
-.six-button::before, .six-button::after { content: ""; position: absolute; inset: -8px; border-radius: 50%; border: 6px solid #8ceaff; pointer-events: none; animation: six-wave 1.05s ease-out infinite; }
-.six-button::after { animation-delay: .52s; }
-.six-ring { position: absolute; left: -24px; top: -24px; width: calc(100% + 48px); height: calc(100% + 48px); transform: rotate(-90deg); pointer-events: none; overflow: visible; }
-.six-ring-bg { fill: none; stroke: #0007; stroke-width: 4; }
-.six-ring-fg { fill: none; stroke: #fff6a8; stroke-width: 4; stroke-linecap: round; stroke-dasharray: 289; stroke-dashoffset: 0; }
-.six-label { position: relative; font: 800 64px/1 var(--font-ui); letter-spacing: .02em; -webkit-text-stroke: 3px #04246f; paint-order: stroke fill; text-shadow: 0 5px 0 #04246f, 0 0 20px #fffa; }
-.six-button small { position: relative; margin-top: 4px; font: 800 13px/1 var(--font-ui); letter-spacing: .08em; text-shadow: 0 2px 2px #000a; }
-.six-button.is-ready { animation: none; filter: saturate(.45) brightness(.85); cursor: default; }
-.six-button.is-ready::before, .six-button.is-ready::after, .six-button.is-safe::before, .six-button.is-safe::after { display: none; }
-.six-button.is-urgent { animation: six-shake .16s linear infinite; }
-.six-button.is-urgent .six-ring-fg { stroke: #ff4b3a; }
-.six-button.is-urgent::before, .six-button.is-urgent::after { border-color: #ff7a66; animation-duration: .5s; }
-.six-button.is-safe { animation: none; cursor: default; background: radial-gradient(circle at 35% 28%, #c9ffd9, #2ad66c 48%, #0a7a3a 100%); box-shadow: 0 0 0 7px #fff, 0 0 0 11px #0a7a3a, 0 0 40px 10px #2ad66caa, 0 18px 30px #000a; }
-@keyframes six-pulse { from { transform: translate(-50%, -50%) scale(1); } to { transform: translate(-50%, -50%) scale(1.08); } }
-@keyframes six-wave { 0% { opacity: .9; transform: scale(1); } 100% { opacity: 0; transform: scale(1.7); } }
-@keyframes six-shake { 0%, 100% { transform: translate(-50%, -50%) rotate(0); } 25% { transform: translate(calc(-50% - 4px), -50%) rotate(-2deg); } 75% { transform: translate(calc(-50% + 4px), -50%) rotate(2deg); } }
-@keyframes six-drain { to { stroke-dashoffset: 289; } }
 .seat-panel.is-safe::after {
   content: "✓"; position: absolute; right: -14px; top: 18px; width: 36px; height: 36px; border: 3px solid #fff; border-radius: 50%; background: #28d46a; color: #fff;
   font: 800 22px/30px var(--font-ui); text-align: center; box-shadow: 0 4px 8px #0008; animation: uno-pop .35s cubic-bezier(.2, 1.5, .4, 1) both;
 }
-.reduce-motion .six-button, .reduce-motion .six-button::before, .reduce-motion .six-button::after { animation: none !important; }
+
+
+/* ==========================================================================
+   V9 — wild pickers: squash & stretch pops (no particles), cube picker for +4,
+   sprite recolor, new "6" button
+   ========================================================================== */
+@property --hh { syntax: '<length>'; inherits: true; initial-value: 58px; }
+@property --wz { syntax: '<length>'; inherits: true; initial-value: 2.2px; }
+
+/* circular wheel: shoots up from the pile (stretched), lands squashed, settles */
+@keyframes wheel-in {
+  0% { opacity: 0; transform: translateY(46px) scale(.15, .15); --wz: 0px; }
+  22% { opacity: 1; }
+  42% { transform: translateY(-16px) scale(.86, 1.18); --wz: 7px; }
+  66% { transform: translateY(5px) scale(1.14, .86); --wz: 1.2px; }
+  84% { transform: translateY(-2px) scale(.97, 1.04); --wz: 3px; }
+  100% { transform: none; --wz: 2.2px; }
+}
+.wheel-slice { animation: slice-spring .6s cubic-bezier(.2, 1.4, .3, 1) backwards; animation-delay: calc(var(--k, 0) * 60ms + 160ms); }
+.slice-yellow { --k: 0; } .slice-green { --k: 1; } .slice-blue { --k: 2; } .slice-red { --k: 3; }
+@keyframes slice-spring { from { transform: translateZ(-8px) scale(.55); opacity: 0; } 55% { transform: translateZ(30px) scale(1.04); opacity: 1; } to { transform: translateZ(0) scale(1); } }
+
+/* +4: four solid blocks (OG UNO style) that rise out of the pile */
+.cube-set { display: none; position: absolute; left: 0; top: 0; width: 0; height: 0; --cs: calc(var(--pile-h) * .74); transform: perspective(1000px) rotateX(52deg) translateY(calc(var(--pile-h) * -.12)); }
+.wild-stage.is-wild4 .cube-set { display: block; }
+.wild-stage.is-wild4 .wheel-3d, .wild-stage.is-wild4 .wheel-shadow { display: none; }
+.wild-stage.is-wild4 { animation: none; }
+.cube {
+  position: absolute; width: var(--cs); height: var(--cs); left: calc(var(--cs) * (var(--ux) - .5)); top: calc(var(--cs) * (var(--uy) - .5)); padding: 0; border: 0; background: none; cursor: pointer;
+  --hh: 58px; transition: --hh .18s ease; animation: cube-pop .85s cubic-bezier(.25, 1, .3, 1) both; animation-delay: calc(var(--k) * 80ms); outline: none;
+}
+.cube::before { /* extruded front face: grows/shrinks for the stretch + squash */
+  content: ""; position: absolute; left: 0; top: 0; width: 100%; height: calc(100% + var(--hh)); border-radius: 12%;
+  background: linear-gradient(#0000 55%, #0004), color-mix(in srgb, var(--c) 52%, #000); box-shadow: 0 10px 14px #0006;
+}
+.cube::after { content: ""; position: absolute; inset: 0; border-radius: 12%; background: linear-gradient(145deg, #ffffffb8, #fff0 48%), var(--c); box-shadow: inset 0 0 0 4px #ffffff59; }
+.cube:hover, .cube:focus-visible, .cube.is-hover { --hh: 80px; }
+.cube-red { --c: #ee2a3b; } .cube-green { --c: #25b25e; } .cube-blue { --c: #2fb4ff; } .cube-yellow { --c: #ffd51f; }
+.cube-cancel { position: absolute; left: -15px; top: -15px; width: 30px; height: 30px; transform: translateY(-4px); }
+@keyframes cube-pop {
+  0% { opacity: 0; transform: translate(calc(var(--cs) * var(--ux) * -1), calc(var(--cs) * var(--uy) * -1)) scale(.25); --hh: 0px; }
+  14% { opacity: 1; }
+  42% { transform: translate(calc(var(--cs) * var(--ux) * -.3), calc(var(--cs) * var(--uy) * -.3)) scale(.72, .9); --hh: 150px; }
+  66% { transform: translate(calc(var(--cs) * var(--ux) * .07), calc(var(--cs) * var(--uy) * .07)) scale(1.18, 1.02); --hh: 10px; }
+  84% { transform: scale(.97); --hh: 74px; }
+  100% { opacity: 1; transform: none; --hh: 58px; }
+}
+
+/* wild card colour change: smooth sprite crossfade + soft light sweep */
+.discard-card .playing-card { overflow: hidden; }
+.recolor-img { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: inherit; animation: recolor-in .75s ease-in-out both; pointer-events: none; }
+.recolor-glow { position: absolute; inset: 0; border-radius: inherit; background: radial-gradient(circle at 50% 50%, #fffbe0 0, #fff6 40%, #fff0 72%); mix-blend-mode: screen; animation: recolor-glow .75s ease-out both; pointer-events: none; }
+@keyframes recolor-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes recolor-glow { 0% { opacity: 0; transform: scale(.5); } 40% { opacity: .75; transform: scale(1); } 100% { opacity: 0; transform: scale(1.25); } }
+
+/* 6 reaction: a chunky arcade button, locked (charging) until GO, then loud and pulsing. No numbers, no timer. */
+.six-button { position: absolute; z-index: 30; left: 0; top: 0; width: 190px; height: 190px; padding: 0; border: 0; border-radius: 50%; background: none; transform: translate(-50%, -50%); cursor: pointer; }
+.six-button::before {
+  content: ""; position: absolute; inset: 0; border-radius: 50%; transition: transform .08s, box-shadow .08s;
+  background: radial-gradient(circle at 35% 26%, #d6fbff 0, #31d2ff 30%, #0b6bff 70%, #0636b0 100%);
+  box-shadow: 0 0 0 8px #fff, 0 0 0 13px #0a3fbf, 0 14px 0 13px #052a86, 0 28px 36px #000b, 0 0 60px 16px #25c9ffaa;
+}
+.six-button:not(:disabled):active::before { transform: translateY(12px); box-shadow: 0 0 0 8px #fff, 0 0 0 13px #0a3fbf, 0 2px 0 13px #052a86, 0 10px 18px #000b, 0 0 60px 16px #25c9ffaa; }
+.six-label { position: relative; display: block; font: 800 italic 118px/1 var(--font-ui); color: #fff; -webkit-text-stroke: 7px #04246f; paint-order: stroke fill; text-shadow: 0 7px 0 #04246f; transition: transform .08s; }
+.six-label::after { content: ""; position: absolute; left: 20%; right: 20%; bottom: 6px; height: 10px; border-radius: 6px; background: #fff; box-shadow: 0 0 0 3px #04246f; }
+.six-button:not(:disabled):active .six-label { transform: translateY(12px); }
+.six-button.is-appear { animation: six-appear .65s cubic-bezier(.2, 1.5, .35, 1) both; }
+.six-charge { position: absolute; left: -26px; top: -26px; width: calc(100% + 52px); height: calc(100% + 52px); transform: rotate(-90deg); pointer-events: none; overflow: visible; }
+.six-ring-bg { fill: none; stroke: #0006; stroke-width: 3.5; }
+.six-ring-fg { fill: none; stroke: #fff; stroke-width: 3.5; stroke-linecap: round; stroke-dasharray: 289; stroke-dashoffset: 289; }
+.six-button.is-lock { pointer-events: none; cursor: default; filter: grayscale(.8) brightness(.78); }
+.six-button.is-go:not(.is-appear) { animation: six-pulse .42s ease-in-out infinite alternate; }
+.six-button.is-go .six-ring-fg, .six-button.is-safe .six-ring-fg { opacity: 0; }
+.six-button.is-go::after { content: ""; position: absolute; inset: -8px; border-radius: 50%; border: 7px solid #fff; pointer-events: none; animation: six-wave .9s ease-out infinite; }
+.six-button.is-flash { animation: six-go-flash .6s ease-out both; }
+.six-button.is-safe { cursor: default; }
+.six-button.is-safe::before { background: radial-gradient(circle at 35% 26%, #d4ffe0, #2ad66c 46%, #0a7a3a 100%); box-shadow: 0 0 0 8px #fff, 0 0 0 13px #0a7a3a, 0 14px 0 13px #065a29, 0 28px 36px #000b, 0 0 50px 12px #2ad66caa; }
+@keyframes six-appear { 0% { opacity: 0; transform: translate(-50%, -50%) scale(.1) rotate(-30deg); } 100% { opacity: 1; transform: translate(-50%, -50%) scale(1) rotate(0); } }
+@keyframes six-pulse { from { transform: translate(-50%, -50%) scale(1); } to { transform: translate(-50%, -50%) scale(1.07); } }
+@keyframes six-wave { 0% { opacity: .9; transform: scale(1); } 100% { opacity: 0; transform: scale(1.6); } }
+@keyframes six-go-flash { 0% { transform: translate(-50%, -50%) scale(1.25); filter: brightness(2); } 100% { transform: translate(-50%, -50%) scale(1); filter: none; } }
+@keyframes six-charge { to { stroke-dashoffset: 0; } }
+.reduce-motion .six-button, .reduce-motion .six-button::after, .reduce-motion .cube, .reduce-motion .wild-stage { animation: none !important; }

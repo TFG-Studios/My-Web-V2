@@ -15,8 +15,8 @@ const rooms = new Map();
 const ROOM_CAPACITY = 5;
 const DISCONNECT_GRACE_MS = 60_000;
 const UNO_CATCH_MS = 6_000;
-const REACTION_MS = 4_500;
-const REACTION_LEAD_MS = 1_400; // clients finish the play animation before the countdown starts
+const REACTION_GO_MS = 2_200; // lead-in: clients finish the play animation, nobody can tap before GO
+const REACTION_FAILSAFE_MS = Number(process.env.UNO_SIX_FAILSAFE_MS) || 15_000; // hidden safety net so a stuck/AFK player can't freeze the table
 const AUTO_SKIP_MS = 10_000;
 const VALID_SETTINGS = Object.keys(engine.DEFAULT_SETTINGS);
 
@@ -78,6 +78,7 @@ function publicState(room, viewerId) {
   const viewerIndex = playerIndex(room, viewerId);
   const viewerHand = game && viewerIndex >= 0 ? game.hands[viewerIndex] : [];
   return {
+    serverNow: Date.now(),
     code: room.code,
     hostId: room.hostId,
     settings: { ...room.settings },
@@ -127,11 +128,12 @@ function publicState(room, viewerId) {
         id: game.sixReaction.id,
         active: game.sixReaction.active,
         startsAt: game.sixReaction.startsAt,
-        deadline: game.sixReaction.deadline,
         pressed: [...game.sixReaction.pressed],
         playerIds: [...game.sixReaction.playerIds],
       } : null,
       lastSixResult: game.lastSixResult || null,
+      lastSwap: game.lastSwap || null,
+      lastRotate: game.lastRotate || null,
     } : null,
   };
 }
@@ -225,21 +227,19 @@ function startSixReaction(room) {
   if (!game || !game.settings.sixReaction || game.winnerId) return;
   clearTimer(room, 'reaction');
   const id = randomUUID();
-  const startsAt = Date.now() + REACTION_LEAD_MS;
+  const startsAt = Date.now() + REACTION_GO_MS;
   game.sixReaction = {
     id,
     active: true,
-    playerIds: room.players.map(player => player.id),
+    playerIds: room.players.filter(player => player.connected).map(player => player.id),
     pressed: [],
     startsAt,
-    deadline: startsAt + REACTION_MS,
   };
-  notice(room, '6 REACTION! Tap your button before the timer runs out!', 'reaction');
   sendState(room);
   room.timers.reaction = setTimeout(() => {
     if (!room.game?.sixReaction || room.game.sixReaction.id !== id) return;
     finishSixReaction(room);
-  }, REACTION_LEAD_MS + REACTION_MS);
+  }, REACTION_GO_MS + REACTION_FAILSAFE_MS);
 }
 
 function finishSixReaction(room) {
@@ -265,7 +265,6 @@ function finishSixReaction(room) {
   }
   game.lastSixResult = { id: reaction.id, loserIds, reason };
   cancelReaction(room);
-  if (names.length) notice(room, `${names.join(', ')} ${reason === 'last' ? 'was the slowest' : 'missed the 6 reaction'} and draws 2 cards.`, 'penalty');
   sendState(room);
 }
 
@@ -391,7 +390,7 @@ function playCard(room, socket, payload = {}) {
         if (game.settings.zeroSeven) {
           if (game.direction === 1) game.hands.unshift(game.hands.pop());
           else game.hands.push(game.hands.shift());
-          // Hands rotate, player seats do not. Hand counts update on the next state.
+          game.lastRotate = { id: randomUUID(), direction: game.direction };
         }
         advance(room);
         break;
@@ -535,6 +534,7 @@ function swapHands(room, socket, targetId) {
   if (from < 0 || to < 0 || from === to) return socket.emit('toast', { text: 'Choose another player.', kind: 'warning' });
   [game.hands[from], game.hands[to]] = [game.hands[to], game.hands[from]];
   game.awaitingSwapPlayerId = null;
+  game.lastSwap = { id: randomUUID(), a: socket.id, b: targetId };
   notice(room, `${playerName(room, socket.id)} swapped hands with ${playerName(room, targetId)}.`, 'info');
   advance(room);
   sendState(room);
@@ -799,6 +799,7 @@ io.on('connection', socket => {
       playerId: socket.id,
       active: Boolean(payload?.active),
       hover: colors.includes(payload?.hover) ? payload.hover : null,
+      kind: payload?.kind === 'wild4' ? 'wild4' : 'wild',
     });
   });
 
