@@ -65,3 +65,16 @@
 - Cards are 2-sided 3D objects: arcing flights, tilt from table plane, mid-air flip (draw → hand turns face-up, opponent plays turn face-up), exact landing in the reserved hand slot. Deal-in at round start (deck in the centre, one card at a time), then the deck glides to its corner.
 - Persistent seats/fans (cards move instead of popping), slap on landing, burst effects for Skip / Reverse / +2 / Wild / +4, floating "+N" on the victim.
 - 6 reaction: last tapper now draws 2 (and anyone who never taps), GO-moment lead-in with false-start guard, new electric-blue pulsing button with draining ring and shockwaves, ✓ badges on tapped players, "SLOWEST!" callout. Added test/six-reaction.test.js (needs socket.io-client).
+
+## V9
+- Normal / draw-until-playable draws no longer show "+N"; it only appears for penalties from enemy cards (+2, +4, taking a stacked penalty).
+- Wild cards land as their black sprite; after the colour is chosen the matching colour sprite (new `docs/cards/WC_*.png`, `W4_*.png`, sliced from `assets/uno-classic-sheet.png`) fades in with a soft light sweep. Colour ring and white burst removed.
+- Wild picker: circular wheel pops from the pile with squash & stretch; +4 uses four extruded blocks (OG style) that shoot up from the pile. Shown to all players (server relays `kind`).
+- 6 rule: no timer. Everyone taps; the last tapper draws 2 automatically (hidden 15s safety net for AFK players). Button is locked (charging ring) until a server-synced GO, so nobody can tap instantly; client clocks are corrected with `serverNow`, which fixes the 1.5–2s late taps on non-host devices.
+- 7 / 0: fixed hands being treated as draws (card values are numbers). New OG-style handover: hands gather into stacks, stacks travel to the new owner(s) (7: the two players; 0: every seat in play direction), then spread into fans. Server now sends `lastSwap` / `lastRotate`.
+
+## V10
+- Swap/rotate (7 / 0) animation: the card stack is now a persistent object that stays on screen through gather → travel → spread, so nothing blinks between stages.
+- Wild cards: bigger landing (card slam, pile shake, spinning rainbow rays + four stars), then a colour-matched flash/rays (+ "+4" icon for Wild Draw Four) as the sprite recolors.
+- Hand: grey and slightly lowered when it is not your turn; bright and slightly raised on your turn, playable cards get the same golden glow as the draw deck.
+- +4 challenge restored: it is now offered on every fresh +4 (previously only with stacking off). With stacking on you may also answer with your own +4. Buttons: red Challenge / blue Decline. Added test/wild4-challenge.test.js.

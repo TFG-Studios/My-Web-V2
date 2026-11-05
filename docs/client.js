@@ -40,6 +40,7 @@
   let leaveTimer = null;
   let lastPointerType = 'mouse';
   let pendingWildKind = 'wild';
+  let handActive = false;
   let clockOffset = 0;
   const clockSamples = [];
   let sixGoTimer = null;
@@ -265,7 +266,8 @@
   }
 
   function localCanPlay(card, game, hand) {
-    if (!state || !game || game.winnerId || game.sixReaction?.active || game.awaitingSwapPlayerId || game.pendingWild4) return false;
+    if (!state || !game || game.winnerId || game.sixReaction?.active || game.awaitingSwapPlayerId) return false;
+    if (game.pendingWild4) return Boolean(state.settings.stacking && card.value === 'Wild4');
     if (game.pendingDraw > 0) {
       if (game.pendingType === 'Draw2' && card.value === 'Draw2') return true;
       if (game.pendingType === 'Wild4' && card.value === 'Wild4') return true;
@@ -375,8 +377,7 @@
   const sleep = ms => (director.skip || ms <= 0 ? Promise.resolve() : new Promise(resolve => setTimeout(resolve, ms)));
   const FAST = () => director.skip || prefs.reduceMotion || document.hidden;
 
-  function flyCard({ card = null, back = false, from, to, flip = null, duration = 650, delay = 0, arc = -70, spin = 0 }) {
-    if (FAST() || !from || !to) return Promise.resolve();
+  function buildFlyEl(from, card, back) {
     const wrap = document.createElement('div');
     wrap.className = 'fly3d';
     wrap.style.cssText = `width:${from.w}px;height:${from.h}px;left:${from.x - from.w / 2}px;top:${from.y - from.h / 2}px;`;
@@ -387,13 +388,17 @@
     const rear = makeCardBack();
     rear.classList.add('fly-face', 'rear');
     inner.append(front, rear);
+    if (back) inner.style.transform = 'rotateY(180deg)';
     wrap.appendChild(inner);
     $('cardFlightLayer').appendChild(wrap);
+    return { wrap, inner };
+  }
+
+  function runFly(wrap, inner, { from, to, flip = null, duration = 650, delay = 0, arc = -70, spin = 0 }) {
     const dx = to.x - from.x, dy = to.y - from.y, s = to.w / from.w;
     const fr = from.rot || 0, tr = (to.rot || 0) + spin, ft = from.tilt || 0, tt = to.tilt || 0;
     const T = (x, y, t, r, sc) => `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) perspective(${FLY_P}px) rotateX(${t.toFixed(1)}deg) rotateZ(${r.toFixed(1)}deg) scale(${sc.toFixed(3)})`;
-    const dist = Math.hypot(dx, dy);
-    const lift = 1 + Math.min(0.3, dist / 2400 + 0.12);
+    const lift = 1 + Math.min(0.3, Math.hypot(dx, dy) / 2400 + 0.12);
     const motion = wrap.animate([
       { transform: T(0, 0, ft, fr, 1), easing: 'cubic-bezier(.32,0,.4,1)' },
       { transform: T(dx * 0.55, dy * 0.55 + arc, ((ft + tt) / 2) * 0.4, fr + (tr - fr) * 0.55, ((1 + s) / 2) * lift), offset: 0.55, easing: 'cubic-bezier(.2,.7,.25,1)' },
@@ -405,7 +410,14 @@
       const turn = inner.animate([{ transform: a }, { transform: b }], { duration: duration * 0.72, delay, easing: 'cubic-bezier(.4,0,.2,1)', fill: 'both' });
       director.anims.add(turn);
       turn.finished.catch(() => {}).then(() => director.anims.delete(turn));
-    } else if (back) inner.style.transform = 'rotateY(180deg)';
+    }
+    return motion;
+  }
+
+  function flyCard({ card = null, back = false, from, to, flip = null, duration = 650, delay = 0, arc = -70, spin = 0 }) {
+    if (FAST() || !from || !to) return Promise.resolve();
+    const { wrap, inner } = buildFlyEl(from, card, back);
+    const motion = runFly(wrap, inner, { from, to, flip, duration, delay, arc, spin });
     return motion.finished.catch(() => {}).then(() => { director.anims.delete(motion); wrap.remove(); });
   }
 
@@ -725,7 +737,8 @@
     els.forEach((el, i) => {
       const off = i - (count - 1) / 2;
       let x = off * step, y = off * off * arcK, angle = off * angStep, scale = 1;
-      if (el._playable) y -= 12;
+      y += handActive ? -10 : 16;
+      if (el._playable) y -= 7;
       if (hoverIndex >= 0 && !el.classList.contains('is-arriving')) {
         if (i === hoverIndex) { y = -lift; angle = 0; scale = 1.1; }
         else { const d = i - hoverIndex; x += Math.sign(d) * spread * (falloff[Math.min(Math.abs(d), 5)] || 0); }
@@ -744,7 +757,9 @@
     const container = $('myHand');
     const me = view.players.find(player => player.id === socket.id);
     const meIndex = Math.max(0, view.players.findIndex(player => player.id === socket.id));
-    const isMyTurn = Boolean(me?.isTurn && !game.winnerId && !view.anim);
+    const activeNow = Boolean(me?.isTurn && !game.winnerId);
+    handActive = activeNow;
+    const isMyTurn = activeNow && !view.anim;
     const hiddenIds = view.hiddenHandIds || new Set();
     const oldElements = new Map([...container.querySelectorAll('[data-card-id]')].map(el => [el.dataset.cardId, el]));
     const newIds = new Set(hand.map(card => card.id));
@@ -759,6 +774,8 @@
       }
       const playable = isMyTurn && localCanPlay(card, game, hand);
       element._playable = playable;
+      element.classList.toggle('is-idle', !activeNow);
+      element.classList.toggle('is-playable', playable);
       element.classList.toggle('is-unplayable', isMyTurn && !playable);
       element.classList.toggle('is-arriving', hiddenIds.has(card.id));
       els.push(element);
@@ -860,6 +877,35 @@
     Wild4: '<svg viewBox="0 0 100 100"><rect x="14" y="20" width="36" height="52" rx="6" transform="rotate(-14 32 46)"/><rect x="34" y="14" width="36" height="52" rx="6"/><rect x="52" y="24" width="36" height="52" rx="6" transform="rotate(14 70 50)"/></svg>',
     Wild: '<svg viewBox="0 0 100 100"><path d="M50 50 L50 6 A44 44 0 0 1 94 50Z"/><path d="M50 50 L94 50 A44 44 0 0 1 50 94Z"/><path d="M50 50 L50 94 A44 44 0 0 1 6 50Z"/><path d="M50 50 L6 50 A44 44 0 0 1 50 6Z"/></svg>',
   };
+  function spawnFx(className, html, ms, color) {
+    const host = document.querySelector('.center');
+    const el = document.createElement('div');
+    el.className = className;
+    if (color) el.style.setProperty('--bc', color);
+    el.innerHTML = html;
+    host.appendChild(el);
+    window.setTimeout(() => el.remove(), ms);
+    return el;
+  }
+  // Wild landing: rainbow light rays + four coloured stars + a hard slam of the card and the pile.
+  function wildLandEffect() {
+    if (FAST()) return;
+    spawnFx('burst wild-land', `<i class="wild-rays"></i><i class="wild-rays r2"></i>${[0, 1, 2, 3].map(i => `<u class="wild-star s${i}" style="--a:${45 + i * 90}deg"></u>`).join('')}`, 1500);
+    const top = document.querySelector('#discardPile .discard-card.is-top');
+    if (top) { top.classList.remove('is-new'); void top.offsetWidth; top.classList.add('wild-slam'); }
+    const pile = document.querySelector('.pile-discard');
+    pile.classList.remove('is-shake'); void pile.offsetWidth; pile.classList.add('is-shake');
+    playSfx('action');
+  }
+  // Colour chosen: a flash + rays in that colour (and the +4 icon for a Wild Draw Four).
+  function colorBurstEffect(card, colorKey) {
+    if (FAST()) return;
+    const color = BURST_COLORS[colorKey] || '#fff';
+    const icon = card.value === 'Wild4' ? `<span class="burst-icon">${BURST_ICONS.Wild4}<b>+4</b></span>` : '';
+    const streaks = Array.from({ length: 14 }, (_, i) => `<u class="burst-spark" style="--a:${Math.round((360 / 14) * i + Math.random() * 12)}deg;--d:${90 + Math.round(Math.random() * 110)}px"></u>`).join('');
+    spawnFx('burst burst-color', `<i class="color-flash"></i><i class="color-rays"></i>${icon}${streaks}`, 1500, color);
+  }
+
   async function playEffect(card, colorKey) {
     if (FAST() || card.color === 'wild') return;
     const kind = BURST_ICONS[card.value] ? card.value : 'num';
@@ -1019,12 +1065,26 @@
     return { ...centerOf(rec.wrap.getBoundingClientRect()), w: layout.oppW * layout.s, h: layout.oppH * layout.s, rot: 0, tilt: 0 };
   };
 
-  // OG-style trade: every hand is gathered into a stack, stacks glide to their new owners, then spread into a fan.
+  // OG-style trade: every hand is gathered into a stack, the stack glides to its new owner, then spreads into a fan.
+  // The stack is a persistent object that stays on screen through all three stages (no flicker between them).
+  const makeStack = pt => Array.from({ length: 4 }, (_, layer) => {
+    const from = { ...pt, x: pt.x + layer * 1.6, y: pt.y - layer * 2.4 };
+    const { wrap, inner } = buildFlyEl(from, null, true);
+    wrap.style.visibility = 'hidden';
+    return { wrap, inner, from, layer };
+  });
+  const moveStackLayer = (item, to, opts) => {
+    if (FAST()) return Promise.resolve();
+    const motion = runFly(item.wrap, item.inner, { from: item.from, to: { ...to, x: to.x + item.layer * 1.6, y: to.y - item.layer * 2.4 }, ...opts });
+    return motion.finished.catch(() => {}).then(() => director.anims.delete(motion));
+  };
+
   async function handoverScene(view, next, moves, chk) {
-    const stackPts = new Map(moves.map(m => [m.from, seatStackPoint(m.from)]));
+    const pts = new Map(moves.map(m => [m.from, seatStackPoint(m.from)]));
+    const stacks = new Map(moves.map(m => [m.from, makeStack(pts.get(m.from))]));
     const gather = [];
     for (const m of moves) {
-      const pt = stackPts.get(m.from);
+      const pt = pts.get(m.from);
       if (m.from === socket.id) {
         handView.els.forEach((el, i) => gather.push(flyCard({ card: handView.cards[i], flip: 'toBack', from: handPoint(el), to: pt, duration: 520, delay: i * 30, arc: -24 })));
         view.game.hand = [];
@@ -1037,25 +1097,26 @@
     playSfx('card');
     renderView(view);
     await Promise.all(gather); chk();
-    await sleep(140); chk();
+    // the stack appears exactly where the last card landed
+    stacks.forEach(layers => layers.forEach(item => { item.wrap.style.visibility = ''; }));
+    await sleep(260); chk();
     const travel = [];
     moves.forEach((m, k) => {
-      const from = stackPts.get(m.from), to = stackPts.get(m.to);
-      for (let layer = 0; layer < 4; layer += 1) {
-        travel.push(flyCard({ back: true, from: { ...from, x: from.x + layer * 1.6, y: from.y - layer * 2.4 }, to: { ...to, x: to.x + layer * 1.6, y: to.y - layer * 2.4 }, duration: 950, delay: layer * 30, arc: k % 2 ? 80 : -100, spin: k % 2 ? -12 : 10 }));
-      }
+      stacks.get(m.from).forEach((item, layer) => travel.push(moveStackLayer(item, pts.get(m.to), { duration: 950, delay: layer * 30, arc: k % 2 ? 80 : -100, spin: k % 2 ? -12 : 10 })));
     });
     playSfx('action');
     await Promise.all(travel); chk();
-    await sleep(100); chk();
+    await sleep(200); chk();
     const spreads = moves.map(m => (async () => {
       const dest = next.players.find(q => q.id === m.to);
       const list = m.to === socket.id ? [...(next.game.hand || [])] : Array.from({ length: dest?.count || 0 }, (_, i) => ({ id: `spread-${m.to}-${i}` }));
       const flights = [];
-      for (const card of list) { flights.push(dispatchDraw(view, next, m.to, card, { from: stackPts.get(m.to), duration: 640 })); await sleep(55); chk(); }
+      for (const card of list) { flights.push(dispatchDraw(view, next, m.to, card, { from: pts.get(m.to), duration: 640 })); await sleep(55); chk(); }
+      stacks.get(m.from).forEach(item => item.wrap.remove());   // the last card has left the stack
       await Promise.all(flights);
     })());
     await Promise.all(spreads); chk();
+    stacks.forEach(layers => layers.forEach(item => item.wrap.remove()));
   }
 
   // Wild card: it lands as its black face; once a colour is chosen the matching sprite fades in with a soft light sweep.
@@ -1110,7 +1171,13 @@
       view.game.top = ng.top; view.game.direction = ng.direction;
       if (!isWild) view.game.color = ng.color;
       renderView(view);
-      if (isWild) { await sleep(420); chk(); await recolorTop(ng.color, view); }
+      if (isWild) {
+        wildLandEffect();
+        await sleep(640); chk();
+        colorBurstEffect(card, ng.color);
+        await recolorTop(ng.color, view);
+        await sleep(card.value === 'Wild4' ? 520 : 220);
+      }
       else await playEffect(card, ng.color);
       chk();
     } else {

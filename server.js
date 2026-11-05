@@ -281,13 +281,13 @@ function playCard(room, socket, payload = {}) {
   if (!game || game.winnerId) return;
   if (game.sixReaction?.active) return socket.emit('toast', { text: 'Wait for the reaction to finish.', kind: 'warning' });
   if (game.awaitingSwapPlayerId) return socket.emit('toast', { text: 'Choose a player to swap hands with first.', kind: 'warning' });
-  if (game.pendingWild4) return socket.emit('toast', { text: 'Accept the +4 or challenge it before playing.', kind: 'warning' });
 
   const index = playerIndex(room, socket.id);
   if (index < 0 || index !== game.turn) return socket.emit('toast', { text: 'It is not your turn.', kind: 'warning' });
   const hand = game.hands[index];
   const card = hand.find(item => item.id === payload.cardId);
   if (!card) return socket.emit('toast', { text: 'That card is no longer in your hand.', kind: 'warning' });
+  if (game.pendingWild4 && !(game.settings.stacking && card?.value === 'Wild4')) return socket.emit('toast', { text: 'Challenge the +4 or decline it before playing.', kind: 'warning' });
   if (!engine.canPlay(game, hand, card)) return socket.emit('toast', { text: 'That card cannot be played right now.', kind: 'warning' });
   const chosenColor = payload.color;
   if (card.color === 'wild' && !engine.COLORS.includes(chosenColor)) {
@@ -370,14 +370,13 @@ function playCard(room, socket, payload = {}) {
         game.pendingDraw = 4;
         game.pendingType = 'Wild4';
         advance(room);
-        if (!game.settings.stacking) {
-          game.pendingWild4 = {
-            offenderId: socket.id,
-            targetId: room.players[game.turn]?.id,
-            previousColor,
-            wasIllegal: hadMatchingColor,
-          };
-        }
+        // A fresh +4 can always be challenged (with stacking on, the target may also answer with their own +4).
+        game.pendingWild4 = {
+          offenderId: socket.id,
+          targetId: room.players[game.turn]?.id,
+          previousColor,
+          wasIllegal: hadMatchingColor,
+        };
         break;
       case '7':
         if (game.settings.zeroSeven) {
