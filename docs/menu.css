@@ -189,3 +189,23 @@ body[data-screen="lobbyScreen"]::before, body[data-screen="lobbyScreen"]::after 
 .u-crown { z-index: 2; }
 .u-avatar { overflow: visible; }
 .u-avatar svg { border-radius: 12%; }
+
+
+/* ==========================================================================
+   V11 — house-rule hover description + first-time tutorial carousel
+   ========================================================================== */
+.u-rule-desc { max-width: 560px; min-height: 2.6em; margin: 2px 0 0; color: #ffffffc4; font: 600 13px/1.35 var(--font-ui); text-shadow: 0 1px 3px #0007; }
+.rule-intro { max-width: 420px; text-align: center; }
+.rule-intro-icon {
+  display: grid; place-items: center; width: 72px; height: 72px; margin: 0 auto 10px; border-radius: 50%; color: #fff; background: linear-gradient(145deg, #ffe45a, #e29a00);
+  font: 800 24px/1 var(--font-ui); box-shadow: 0 6px 12px #0003;
+}
+.rule-intro h2 { margin-bottom: 8px; }
+.rule-intro-desc { min-height: 4.2em; margin: 0 0 14px; color: #55565e; font: 600 15px/1.45 var(--font-ui); }
+.rule-intro-dots { display: flex; justify-content: center; gap: 7px; margin-bottom: 16px; }
+.rule-intro-dots i { width: 9px; height: 9px; border-radius: 50%; background: #e4e4ea; }
+.rule-intro-dots i.is-active { background: #d4202c; }
+.rule-intro-nav { display: flex; align-items: center; justify-content: center; gap: 14px; }
+.rule-intro-nav .u-round { width: 44px; height: 44px; border-color: #26272c; color: #26272c; background: #f6f6f9; }
+.rule-intro-nav .u-round:hover { background: #26272c; color: #fff; }
+.rule-intro-nav .modal-leave { width: auto; margin-top: 0; padding: 10px 26px; font-size: 16px; }

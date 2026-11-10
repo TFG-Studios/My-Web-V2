@@ -11,10 +11,10 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&display=swap">
-  <link rel="stylesheet" href="./style.css?v=uno-v10">
-  <link rel="stylesheet" href="./menu.css?v=uno-v10">
-  <link rel="stylesheet" href="./game.css?v=uno-v10">
-  <script src="./client.js?v=uno-v10" defer></script>
+  <link rel="stylesheet" href="./style.css?v=uno-v11">
+  <link rel="stylesheet" href="./menu.css?v=uno-v11">
+  <link rel="stylesheet" href="./game.css?v=uno-v11">
+  <script src="./client.js?v=uno-v11" defer></script>
 </head>
 <body>
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -91,6 +91,7 @@
         <label class="u-rule" title="Draw until playable"><input id="ruleDrawUntil" type="checkbox"><span class="u-rule-icon">↻</span><b>Draw</b></label>
         <label class="u-rule" title="6 Reaction"><input id="ruleSixReaction" type="checkbox"><span class="u-rule-icon">6!</span><b>Six</b></label>
       </div>
+      <p id="ruleDesc" class="u-rule-desc">Hover a house rule to see what it does.</p>
       <button id="startGame" class="u-btn u-btn-red u-start" type="button" disabled><span>START</span></button>
       <p id="lobbyHint" class="u-hint" role="status"></p>
     </footer>
@@ -149,11 +150,26 @@
           <b id="myHandCount" class="seat-count">7</b>
         </div>
         <div id="myHand" class="my-hand" aria-label="Your cards"></div>
+        <div id="turnTimer" class="turn-timer is-hidden" aria-hidden="true"><i id="turnTimerFill"></i></div>
         <button id="unoButton" class="uno-call is-hidden" type="button" aria-label="Call UNO"><svg aria-hidden="true"><use href="#unoOval"/></svg></button>
       </div>
     </div>
   </main>
 
+  <div id="ruleIntroModal" class="modal-backdrop is-hidden" role="dialog" aria-modal="true">
+    <section class="modal-card rule-intro">
+      <button id="ruleIntroClose" class="modal-close" type="button" aria-label="Close">×</button>
+      <span id="ruleIntroIcon" class="rule-intro-icon">+2</span>
+      <h2 id="ruleIntroTitle">Stacking</h2>
+      <p id="ruleIntroDesc" class="rule-intro-desc"></p>
+      <div class="rule-intro-dots" id="ruleIntroDots"></div>
+      <div class="rule-intro-nav">
+        <button id="ruleIntroPrev" class="u-round" type="button" aria-label="Previous">←</button>
+        <button id="ruleIntroSkip" class="modal-leave" type="button"><span>Skip</span></button>
+        <button id="ruleIntroNext" class="u-round" type="button" aria-label="Next">→</button>
+      </div>
+    </section>
+  </div>
   <div id="roomSetupModal" class="modal-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="setupTitle">
     <section class="modal-card setup-modal">
       <button class="modal-close" data-close-modal="roomSetupModal" type="button" aria-label="Close">×</button>
@@ -193,8 +209,26 @@
   </div>
 
 
+  <div id="vsSplash" class="vs-splash is-hidden" aria-hidden="true">
+    <div class="vs-rays" aria-hidden="true"></div>
+    <div id="vsLeft" class="vs-side vs-left"></div>
+    <div class="vs-word">VS</div>
+    <div id="vsRight" class="vs-side vs-right"></div>
+  </div>
   <div id="unoFx" class="uno-fx-layer" aria-hidden="true"></div>
-  <div id="winOverlay" class="win-overlay is-hidden" role="dialog" aria-modal="true"><div class="win-card"><div class="win-confetti" aria-hidden="true">✦　✦　✦　✦　✦</div><p class="eyebrow">ROUND COMPLETE</p><h2 id="winnerTitle">YOU WIN!</h2><p id="winnerDescription">That was a good hand.</p><button id="backToLobby" class="btn btn-primary btn-large" type="button"><span>Back to lobby</span><b>→</b></button></div></div>
+  <div id="winOverlay" class="win-overlay is-hidden" role="dialog" aria-modal="true">
+    <div class="scoreboard">
+      <div class="sb-rays" aria-hidden="true"></div>
+      <svg class="sb-logo" aria-hidden="true"><use href="#unoOval"/></svg>
+      <h2 id="winnerTitle" class="sb-title">MATCH END</h2>
+      <div id="scoreRow" class="sb-row"></div>
+      <div class="sb-actions">
+        <button id="playAgain" class="u-btn u-btn-red sb-btn is-hidden" type="button"><span>PLAY AGAIN</span></button>
+        <p id="winnerDescription" class="sb-wait"></p>
+        <button id="backToLobby" class="u-round sb-leave" type="button" aria-label="Leave table">←</button>
+      </div>
+    </div>
+  </div>
   <div id="cardFlightLayer" class="card-flight-layer" aria-hidden="true"></div>
   <div id="toastStack" class="toast-stack" aria-live="polite" aria-atomic="false"></div>
   <div id="globalLiveRegion" class="sr-only" aria-live="assertive"></div>

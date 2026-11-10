@@ -82,6 +82,7 @@ function publicState(room, viewerId) {
     code: room.code,
     hostId: room.hostId,
     settings: { ...room.settings },
+    scores: { ...room.scores },
     started: Boolean(game),
     meId: viewerId,
     players: room.players.map((player, index) => ({
@@ -134,6 +135,8 @@ function publicState(room, viewerId) {
       lastSixResult: game.lastSixResult || null,
       lastSwap: game.lastSwap || null,
       lastRotate: game.lastRotate || null,
+      roundPoints: game.winnerId ? (game.roundPoints || 0) : null,
+      handsReveal: game.winnerId ? game.handsReveal : null,
     } : null,
   };
 }
@@ -165,10 +168,28 @@ function drawIntoHand(game, index, count) {
   return drawn;
 }
 
+const ACTION_CARD_POINTS = { Skip: 20, Reverse: 20, Draw2: 20, Wild: 50, Wild4: 50 };
+function cardPoints(card) {
+  if (ACTION_CARD_POINTS[card.value] !== undefined) return ACTION_CARD_POINTS[card.value];
+  const n = Number(card.value);
+  return Number.isFinite(n) ? n : 0;
+}
+
 function addWinner(room, playerId) {
   const game = room.game;
   if (!game) return;
   game.winnerId = playerId;
+  // Freeze a full reveal of every hand (round is over, nothing left to hide) and tally classic UNO scoring:
+  // the winner collects the point value of every card left in everyone else's hand.
+  game.handsReveal = {};
+  let roundPoints = 0;
+  room.players.forEach((player, index) => {
+    const hand = game.hands[index] || [];
+    game.handsReveal[player.id] = hand.map(card => ({ id: card.id, color: card.color, value: card.value }));
+    if (player.id !== playerId) roundPoints += hand.reduce((sum, card) => sum + cardPoints(card), 0);
+  });
+  game.roundPoints = roundPoints;
+  room.scores[playerId] = (room.scores[playerId] || 0) + roundPoints;
   game.armedUnoPlayerId = null;
   game.unoChallenge = null;
   game.pendingWild4 = null;
@@ -663,6 +684,7 @@ io.on('connection', socket => {
       settings: cleanSettings(payload?.settings),
       players: [{ id: socket.id, token, name, connected: true, graceTimer: null }],
       game: null,
+      scores: {},
       timers: { unoCatch: null, reaction: null, autoSkip: null },
     };
     rooms.set(code, room);
@@ -706,6 +728,16 @@ io.on('connection', socket => {
     if (room.game) return;
     room.game = engine.createGame(room.players.length, room.settings);
     notice(room, 'Cards dealt — good luck!', 'success');
+    sendState(room);
+  });
+
+  // Host starts a fresh round with the same players once the current one has a winner; room.scores carries over.
+  socket.on('playAgain', () => {
+    const room = findRoomBySocket(socket.id);
+    if (!room || !room.game?.winnerId) return;
+    if (room.hostId !== socket.id) return socket.emit('toast', { text: 'Only the host can start the next round.', kind: 'warning' });
+    room.game = engine.createGame(room.players.length, room.settings);
+    notice(room, 'New round — cards dealt!', 'success');
     sendState(room);
   });
 

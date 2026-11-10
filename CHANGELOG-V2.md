@@ -78,3 +78,12 @@
 - Wild cards: bigger landing (card slam, pile shake, spinning rainbow rays + four stars), then a colour-matched flash/rays (+ "+4" icon for Wild Draw Four) as the sprite recolors.
 - Hand: grey and slightly lowered when it is not your turn; bright and slightly raised on your turn, playable cards get the same golden glow as the draw deck.
 - +4 challenge restored: it is now offered on every fresh +4 (previously only with stacking off). With stacking on you may also answer with your own +4. Buttons: red Challenge / blue Decline. Added test/wild4-challenge.test.js.
+
+## V11
+- +4 challenge restored for every fresh +4 (previously only offered when stacking was off); with stacking on you may also answer with your own +4. Clarified guard ordering server-side.
+- Fixed the 7/0 hand-swap "blink": the card stack built for the gather→travel→spread animation is now a single persistent object, so nothing disappears between stages.
+- Wild cards get a bigger, distinct landing (rainbow rays + four stars + card slam + pile shake), then a colour-matched flash as the sprite recolors — now clearly bigger than a plain play.
+- Hand now dims and sits lower when it isn't your turn, and lifts/brightens on your turn; playable cards get the same gold glow as the draw deck.
+- New: cosmetic turn-timer bar under the hand (visual only, no auto-draw/pass), a quick red "stamp" flash on every card played (not just specials), a smoother symmetric discard-pile fan, lightning-bolt accents on the "UNO!" effect, and a crisper pulsing ring on the active player's avatar.
+- New: round scoring (classic UNO: winner collects the point value of everyone else's remaining cards), a hand-reveal animation at round end, and a full scoreboard (crown, per-player totals, "+N" gained) with a host-only "Play Again" that starts a fresh round and keeps scores. Added test/scoring-and-rematch.test.js.
+- New: a VS splash before the first round of a match, and a house-rules tutorial carousel (shown once per browser) plus a hover/focus description line under the rules row in the lobby.

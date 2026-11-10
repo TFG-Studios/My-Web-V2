@@ -41,6 +41,12 @@
   let lastPointerType = 'mouse';
   let pendingWildKind = 'wild';
   let handActive = false;
+  const TURN_TIMER_MS = 15000;
+  const TURN_TIMER_WARN_MS = 4000;
+  let turnTimerKey = null;
+  let turnTimerAnim = null;
+  let turnWarnTimer = null;
+  let revealedRoundId = null;
   let clockOffset = 0;
   const clockSamples = [];
   let sixGoTimer = null;
@@ -494,7 +500,36 @@
     playSfx('error');
   }
 
+  // House-rule metadata shared by the hover description and the first-time tutorial carousel.
+  const RULE_INFO = [
+    { id: 'ruleStacking', key: 'stacking', icon: '+2', title: 'Stacking', desc: 'Answer a +2 or +4 with another +2/+4 of your own to pass the whole penalty to the next player instead of drawing.' },
+    { id: 'ruleZeroSeven', key: 'zeroSeven', icon: '7·0', title: '7-0 Swap', desc: 'Play a 7 to swap hands with any other player. Play a 0 and every hand at the table rotates one seat in the direction of play.' },
+    { id: 'ruleDrawUntil', key: 'drawUntilPlayable', icon: '↻', title: 'Draw to Match', desc: 'If you have nothing to play, keep drawing from the deck until you pick up a card you can legally play.' },
+    { id: 'ruleSixReaction', key: 'sixReaction', icon: '6!', title: '6 Reaction', desc: 'Whenever a 6 is played, everyone races to tap the button that appears. Whoever taps last draws two penalty cards.' },
+  ];
+  let ruleIntroIndex = 0;
+  function renderRuleIntroSlide() {
+    const info = RULE_INFO[ruleIntroIndex];
+    $('ruleIntroIcon').textContent = info.icon;
+    $('ruleIntroTitle').textContent = info.title;
+    $('ruleIntroDesc').textContent = info.desc;
+    $('ruleIntroDots').replaceChildren(...RULE_INFO.map((_, i) => {
+      const dot = document.createElement('i');
+      dot.className = i === ruleIntroIndex ? 'is-active' : '';
+      return dot;
+    }));
+  }
+  function openRuleIntro() {
+    ruleIntroIndex = 0;
+    renderRuleIntroSlide();
+    openModal('ruleIntroModal');
+  }
+
   function renderLobby(next) {
+    if (!localStorage.getItem('unoRulesIntroSeen')) {
+      localStorage.setItem('unoRulesIntroSeen', '1');
+      openRuleIntro();
+    }
     $('roomCodeDisplay').textContent = next.code || '------';
     const isHost = socket.id === next.hostId;
     const box = $('lobbyPlayers');
@@ -676,6 +711,32 @@
     }
   }
 
+  function vsAvatarCard(player, index) {
+    const wrap = document.createElement('div');
+    wrap.className = 'vs-avatar-wrap';
+    const av = document.createElement('span');
+    av.className = `seat-avatar acc-${index % 5}`;
+    av.appendChild(makeAvatarSvg(index));
+    const name = document.createElement('b');
+    name.textContent = player.name;
+    wrap.append(av, name);
+    return wrap;
+  }
+  function showVsSplash(view) {
+    if (FAST()) return Promise.resolve();
+    const me = view.players.find(player => player.id === socket.id);
+    const others = view.players.filter(player => player.id !== socket.id);
+    if (!me || !others.length) return Promise.resolve();
+    $('vsLeft').replaceChildren(vsAvatarCard(me, view.players.indexOf(me)));
+    $('vsRight').replaceChildren(...others.slice(0, 3).map(player => vsAvatarCard(player, view.players.indexOf(player))));
+    const splash = $('vsSplash');
+    splash.classList.remove('is-hidden');
+    playSfx('action');
+    return new Promise(resolve => {
+      window.setTimeout(() => { splash.classList.add('is-hidden'); resolve(); }, 1850);
+    });
+  }
+
   function seatBubble(playerId, text, kind = '') {
     const panel = playerId === socket.id ? $('youSeat') : seatEls.get(playerId)?.panel;
     if (!panel) return;
@@ -817,6 +878,33 @@
     $('takePenalty').textContent = `Take ${game.pendingDraw}`;
     $('challengeWildFour').classList.toggle('is-hidden', !wildTarget);
     $('acceptWildFour').classList.toggle('is-hidden', !wildTarget);
+    updateTurnTimer(isMyTurn, `${game.roundId}:${game.turn}`);
+  }
+
+  // Cosmetic-only countdown so a turn always has visible urgency, same as the reference's bar under the hand.
+  // It never forces a draw/pass — it just drains and pulses red near the end.
+  function updateTurnTimer(active, key) {
+    const bar = $('turnTimer');
+    if (!bar) return;
+    if (!active) {
+      bar.classList.add('is-hidden');
+      bar.classList.remove('is-warn');
+      if (turnTimerAnim) { turnTimerAnim.cancel(); turnTimerAnim = null; }
+      clearTimeout(turnWarnTimer);
+      turnTimerKey = null;
+      return;
+    }
+    bar.classList.remove('is-hidden');
+    if (turnTimerKey === key) return;
+    turnTimerKey = key;
+    bar.classList.remove('is-warn');
+    if (turnTimerAnim) turnTimerAnim.cancel();
+    clearTimeout(turnWarnTimer);
+    const fill = $('turnTimerFill');
+    fill.style.transform = 'scaleX(1)';
+    if (FAST()) return;
+    turnTimerAnim = fill.animate([{ transform: 'scaleX(1)' }, { transform: 'scaleX(0)' }], { duration: TURN_TIMER_MS, easing: 'linear', fill: 'forwards' });
+    turnWarnTimer = window.setTimeout(() => { if (turnTimerKey === key) bar.classList.add('is-warn'); }, TURN_TIMER_MS - TURN_TIMER_WARN_MS);
   }
 
   function renderStatus(view) {
@@ -906,6 +994,11 @@
     spawnFx('burst burst-color', `<i class="color-flash"></i><i class="color-rays"></i>${icon}${streaks}`, 1500, color);
   }
 
+  function playStamp() {
+    if (FAST()) return;
+    spawnFx('burst play-stamp', '<i class="stamp-ribbon"></i>', 460);
+  }
+
   async function playEffect(card, colorKey) {
     if (FAST() || card.color === 'wild') return;
     const kind = BURST_ICONS[card.value] ? card.value : 'num';
@@ -959,11 +1052,17 @@
     }
     const pile = $('discardPile');
     pile.replaceChildren();
+    const behind = Math.max(0, discardStack.length - 1);
     discardStack.forEach((entry, index) => {
       const wrap = document.createElement('div');
       const isTop = index === discardStack.length - 1;
       wrap.className = `discard-card${isTop ? ' is-top' : ''}`;
-      wrap.style.transform = `translate(${entry.dx}px, ${entry.dy}px) rotate(${entry.rot}deg)`;
+      // The newest card drops dead-centre; the history fans out symmetrically beneath it, like a hand of cards peeking out.
+      const off = isTop || behind < 2 ? (isTop ? 0 : index - (behind - 1) / 2) : index - (behind - 1) / 2;
+      const fanX = isTop ? 0 : off * 15;
+      const fanY = isTop ? 0 : Math.abs(off) * 4 + 7;
+      const rot = isTop ? entry.rot : entry.rot * 0.35 + off * 4.5;
+      wrap.style.transform = `translate(${fanX.toFixed(1)}px, ${fanY.toFixed(1)}px) rotate(${rot.toFixed(1)}deg)`;
       const cardEl = createCardElement(entry.card, { wildColor: entry.wildColor });
       if (!isTop) cardEl.style.filter = `brightness(${(0.72 + 0.28 * (index / Math.max(1, discardStack.length - 1))).toFixed(2)})`;
       wrap.appendChild(cardEl);
@@ -987,7 +1086,7 @@
     }
     if (game.winnerId && lastWinnerShown !== `${game.roundId}:${game.winnerId}`) {
       lastWinnerShown = `${game.roundId}:${game.winnerId}`;
-      window.setTimeout(() => showWinner(game.winnerId === socket.id, game.winnerName), FAST() ? 0 : 900);
+      window.setTimeout(() => playRoundEnd(view), FAST() ? 0 : 900);
     }
     if (lastGameSnapshot && (game.lastCardId !== lastGameSnapshot.lastCardId || game.turn !== lastGameSnapshot.turn)) {
       const stage = $('wildPicker');
@@ -1177,8 +1276,10 @@
         colorBurstEffect(card, ng.color);
         await recolorTop(ng.color, view);
         await sleep(card.value === 'Wild4' ? 520 : 220);
+      } else {
+        playStamp();
+        await playEffect(card, ng.color);
       }
-      else await playEffect(card, ng.color);
       chk();
     } else {
       view.game.color = ng.color; view.game.direction = ng.direction; view.game.top = ng.top;
@@ -1244,6 +1345,8 @@
     const chk = () => { if (gen !== director.gen) throw ABORT; };
     const ng = next.game;
     if (!prev || prev.game.roundId !== ng.roundId) {
+      if (!prev) await showVsSplash(next);
+      chk();
       resetSceneForRound(ng.roundId);
       if (!ng.lastCardId && !FAST() && backlog < 2) await dealSequence(next, chk);
       return;
@@ -1264,14 +1367,15 @@
         try { await transition(director.shown, next, director.queue.length, gen); }
         catch (error) { if (error !== ABORT) console.error(error); }
         if (gen !== director.gen) break;
-        renderView(cloneView(next));
+            renderView(cloneView(next));
         director.shown = next;
       }
     } finally {
       if (gen === director.gen) { director.running = false; director.skip = false; }
     }
   }
-  window.__unoDirector = director; // read-only handle for debugging / automated tests
+  window.__unoDirector = director;
+  window.__showUnoFx = showUnoFx; // read-only handle for debugging / automated tests
   director.enqueue = next => { director.queue.push(next); pump(); };
   director.reset = () => {
     director.gen += 1; director.queue = []; director.running = false; director.skip = false; director.shown = null;
@@ -1309,7 +1413,10 @@
     const word = document.createElement('div');
     word.className = 'uno-fx-word';
     ['U', 'N', 'O', '!'].forEach((ch, i) => { const s = document.createElement('span'); s.textContent = ch; s.style.setProperty('--i', String(i)); word.appendChild(s); });
-    fx.appendChild(word);
+    const BOLT = '<svg viewBox="0 0 40 90"><path d="M26 0 L4 46 L18 46 L10 90 L38 36 L22 36 Z"/></svg>';
+    const boltL = document.createElement('div'); boltL.className = 'uno-fx-bolt bolt-l'; boltL.innerHTML = BOLT;
+    const boltR = document.createElement('div'); boltR.className = 'uno-fx-bolt bolt-r'; boltR.innerHTML = BOLT;
+    fx.append(boltL, word, boltR);
     if (!prefs.reduceMotion) {
       const colors = ['#ee2a3b', '#ffd51f', '#25b25e', '#2a86dc', '#ffffff'];
       for (let i = 0; i < 18; i += 1) {
@@ -1330,11 +1437,64 @@
     window.setTimeout(() => fx.remove(), 2400);
   }
 
-  function showWinner(isMe, name) {
-    $('winnerTitle').textContent = isMe ? 'UNO! YOU WIN!' : `${name || 'A RIVAL'} WINS!`;
-    $('winnerDescription').textContent = isMe ? 'Beautifully played. Ready for the rematch?' : 'The table remembers. Shuffle up for a rematch.';
+  // Swap a seat's face-down fan for the real cards it held when the round ended (server only reveals once winnerId is set).
+  function revealSeatFan(playerId, cards) {
+    const rec = seatEls.get(playerId);
+    if (!rec || !cards) return;
+    [...rec.fan.children].forEach((el, i) => {
+      const card = cards[i];
+      if (!card) { el.style.opacity = '0'; return; }
+      const face = createCardElement(card, { wildColor: card.color === 'wild' ? (curView?.game?.color || 'red') : undefined });
+      face.className += ' mini-card is-revealed';
+      face.style.cssText = el.style.cssText;
+      el.replaceWith(face);
+    });
+    [...rec.reflectFan.children].forEach(el => { el.style.opacity = '0'; });
+  }
+
+  async function playRoundEnd(view) {
+    const game = view.game;
+    const reveal = game.handsReveal || {};
+    if (revealedRoundId !== game.roundId && !FAST()) {
+      revealedRoundId = game.roundId;
+      for (const player of view.players) {
+        if (player.id === socket.id) continue;
+        revealSeatFan(player.id, reveal[player.id]);
+      }
+      playSfx('card');
+      await sleep(1100);
+    }
+    showScoreboard(view);
+  }
+
+  function showScoreboard(view) {
+    const game = view.game;
+    const isMe = game.winnerId === socket.id;
+    $('winnerTitle').textContent = 'MATCH END';
+    const scores = view.scores || {};
+    const ranked = [...view.players].sort((a, b) => (scores[b.id] || 0) - (scores[a.id] || 0));
+    const topScore = ranked.length ? (scores[ranked[0].id] || 0) : 0;
+    const row = $('scoreRow');
+    row.replaceChildren();
+    view.players.forEach(player => {
+      const index = view.players.indexOf(player);
+      const card = document.createElement('div');
+      const total = scores[player.id] || 0;
+      const isWinner = player.id === game.winnerId;
+      card.className = `sb-card acc-${index % 5}${isWinner ? ' is-winner' : ''}${total === topScore && topScore > 0 ? ' is-leader' : ''}`;
+      const crown = isWinner ? '<i class="sb-crown">★</i>' : '';
+      const gain = isWinner && game.roundPoints ? `<small class="sb-gain">+${game.roundPoints}</small>` : '';
+      card.innerHTML = `${crown}<span class="seat-avatar sb-avatar"></span><b class="sb-name"></b><strong class="sb-score">${total}</strong>${gain}`;
+      card.querySelector('.sb-avatar').appendChild(makeAvatarSvg(index));
+      card.querySelector('.sb-name').textContent = player.name;
+      row.appendChild(card);
+    });
+    const again = $('playAgain');
+    const isHost = view.hostId === socket.id;
+    again.classList.toggle('is-hidden', !isHost);
+    $('winnerDescription').textContent = isHost ? '' : 'Waiting for the host to start the next round…';
     $('winOverlay').classList.remove('is-hidden');
-    playSfx('win');
+    playSfx(isMe ? 'win' : 'card');
   }
 
   function applyState(next) {
@@ -1345,6 +1505,7 @@
     if (next.started && next.game) {
       closeModal('roomSetupModal');
       showScreen('gameScreen');
+      if (!next.game.winnerId) $('winOverlay').classList.add('is-hidden'); // a new round starting hides any scoreboard left over from the last one
       director.enqueue(next);
       clearTimeout(sixGoTimer);
       const six = next.game.sixReaction;
@@ -1356,7 +1517,10 @@
       for (const rec of seatEls.values()) rec.seat.remove();
       seatEls.clear();
       $('winOverlay').classList.add('is-hidden');
+      $('vsSplash').classList.add('is-hidden');
+      updateTurnTimer(false, null);
       lastWinnerShown = null;
+      revealedRoundId = null;
       lastGameSnapshot = null;
       discardStack = []; lastTopId = null; discardRound = null; prevCounts = new Map(); hoverIndex = -1; armedId = null; handView = { cards: [], els: [] };
       $('myHand')?.replaceChildren();
@@ -1421,6 +1585,18 @@
   $('roomCodeInput').addEventListener('input', () => { $('roomCodeInput').value = $('roomCodeInput').value.toUpperCase().replace(/[^A-F0-9]/g, '').slice(0, 6); });
   $('playerNameInput').addEventListener('keydown', event => { if (event.key === 'Enter') submitRoomAction(); });
   $('roomCodeInput').addEventListener('keydown', event => { if (event.key === 'Enter') submitRoomAction(); });
+  RULE_INFO.forEach(info => {
+    const label = $(info.id)?.closest('.u-rule');
+    if (!label) return;
+    const show = () => { $('ruleDesc').textContent = info.desc; };
+    const hide = () => { $('ruleDesc').textContent = 'Hover a house rule to see what it does.'; };
+    label.addEventListener('pointerenter', show); label.addEventListener('focusin', show);
+    label.addEventListener('pointerleave', hide); label.addEventListener('focusout', hide);
+  });
+  $('ruleIntroPrev').addEventListener('click', () => { ruleIntroIndex = (ruleIntroIndex - 1 + RULE_INFO.length) % RULE_INFO.length; renderRuleIntroSlide(); });
+  $('ruleIntroNext').addEventListener('click', () => { ruleIntroIndex = (ruleIntroIndex + 1) % RULE_INFO.length; renderRuleIntroSlide(); });
+  $('ruleIntroSkip').addEventListener('click', () => closeModal('ruleIntroModal'));
+  $('ruleIntroClose').addEventListener('click', () => closeModal('ruleIntroModal'));
   $('openSettings').addEventListener('click', () => { $('leaveGame').classList.add('is-hidden'); openModal('settingsModal'); });
   $('lobbySettings').addEventListener('click', () => { $('leaveGame').classList.add('is-hidden'); openModal('settingsModal'); });
   $('gameSettings').addEventListener('click', () => { $('leaveGame').classList.remove('is-hidden'); openModal('settingsModal'); });
@@ -1463,7 +1639,7 @@
     closeModal('settingsModal');
     socket.emit('leaveRoom');
     $('winOverlay').classList.add('is-hidden');
-    state = null; roomCode = ''; lastGameSnapshot = null;
+    state = null; roomCode = ''; lastGameSnapshot = null; lastWinnerShown = null; revealedRoundId = null;
     showScreen('mainMenu');
   });
 
@@ -1542,6 +1718,7 @@
     if (cardId) socket.emit('playCard', { cardId, color });
     playSfx('action');
   }));
+  $('playAgain').addEventListener('click', () => socket.emit('playAgain'));
   $('backToLobby').addEventListener('click', () => {
     $('winOverlay').classList.add('is-hidden');
     socket.emit('leaveRoom');

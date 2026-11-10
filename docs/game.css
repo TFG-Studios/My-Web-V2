@@ -111,7 +111,8 @@
   transform: rotate(-4deg); box-shadow: 5px 5px 0 -1px #f4f1e8, 5px 5px 0 0 #3a3a3a, 0 8px 10px #0006;
 }
 .seat-panel.is-active .seat-plate { --pa: #f6c23a; --pb: #c58210; }
-.seat-panel.is-active .seat-avatar { border-color: #ffe58a; box-shadow: 0 0 0 3px #ffcf48, 0 0 30px 10px #ffb92acc, 0 8px 14px #0009; }
+.seat-panel.is-active .seat-avatar { border-color: #fff; box-shadow: 0 0 0 2px #fff, 0 0 0 5px #ffcf48, 0 0 28px 9px #ffb92acc, 0 8px 14px #0009; animation: active-ring-pulse 1.1s ease-in-out infinite alternate; }
+@keyframes active-ring-pulse { from { box-shadow: 0 0 0 2px #fff, 0 0 0 5px #ffcf48, 0 0 22px 6px #ffb92acc, 0 8px 14px #0009; } to { box-shadow: 0 0 0 2px #fff, 0 0 0 5px #ffcf48, 0 0 32px 11px #ffb92acc, 0 8px 14px #0009; } }
 .seat-panel.is-offline { opacity: .5; }
 .seat-panel.swap-target { pointer-events: auto; cursor: pointer; }
 .seat-panel.swap-target .seat-avatar { border-color: #fff; box-shadow: 0 0 0 4px #ffffff88, 0 0 28px 8px #fff; }
@@ -445,7 +446,7 @@
 @keyframes six-wave { 0% { opacity: .9; transform: scale(1); } 100% { opacity: 0; transform: scale(1.6); } }
 @keyframes six-go-flash { 0% { transform: translate(-50%, -50%) scale(1.25); filter: brightness(2); } 100% { transform: translate(-50%, -50%) scale(1); filter: none; } }
 @keyframes six-charge { to { stroke-dashoffset: 0; } }
-.reduce-motion .six-button, .reduce-motion .six-button::after, .reduce-motion .cube, .reduce-motion .wild-stage { animation: none !important; }
+.reduce-motion .six-button, .reduce-motion .six-button::after, .reduce-motion .cube, .reduce-motion .wild-stage, .reduce-motion .seat-panel.is-active .seat-avatar { animation: none !important; }
 
 /* ==========================================================================
    V10 — +4 challenge buttons, wild landing + colour effects, shake
@@ -474,3 +475,81 @@
 @keyframes wild-slam { 0% { scale: 1.55; filter: brightness(2.4); } 35% { scale: .88; filter: brightness(1.5); } 62% { scale: 1.09; } 100% { scale: 1; filter: none; } }
 @keyframes pile-shake { 0%, 100% { translate: 0 0; } 20% { translate: -6px 2px; } 40% { translate: 6px -2px; } 60% { translate: -4px 1px; } 80% { translate: 3px -1px; } }
 .reduce-motion .wild-rays, .reduce-motion .color-rays, .reduce-motion .wild-star { animation: none !important; opacity: 0; }
+
+
+/* ==========================================================================
+   V11 — turn timer, universal play stamp, UNO bolts, VS splash, scoreboard
+   ========================================================================== */
+
+/* ----- turn timer: cosmetic urgency bar under the hand (no auto-draw/pass) ----- */
+.turn-timer {
+  position: absolute; z-index: 18; left: 50%; bottom: 4px; width: clamp(200px, 34vw, 380px); height: 7px; border-radius: 5px;
+  background: #00000055; box-shadow: inset 0 0 0 1px #ffffff22; transform: translateX(-50%); overflow: hidden;
+}
+.turn-timer i {
+  display: block; width: 100%; height: 100%; transform-origin: 0 50%; background: linear-gradient(90deg, #ffe27a, #ffb92a);
+  transition: background .3s;
+}
+.turn-timer.is-warn i { background: linear-gradient(90deg, #ff8a5a, #e52a2a); animation: timer-warn .5s ease-in-out infinite alternate; }
+@keyframes timer-warn { from { filter: brightness(1); } to { filter: brightness(1.5); } }
+
+/* ----- universal "play stamp": a quick red ribbon flash on every card, not just specials ----- */
+.play-stamp { z-index: 38; }
+.stamp-ribbon {
+  position: absolute; left: -95px; top: -34px; width: 190px; height: 68px; border-radius: 8px; background: linear-gradient(135deg, #ff5a4a, #c91722);
+  box-shadow: 0 6px 14px #0008, inset 0 0 0 3px #ffffff55; transform: rotate(-8deg) scale(.2); opacity: 0; animation: stamp-pop .46s cubic-bezier(.2, 1.6, .3, 1) both;
+}
+@keyframes stamp-pop {
+  0% { opacity: 0; transform: rotate(-8deg) scale(.15); }
+  35% { opacity: .95; transform: rotate(-8deg) scale(1.08); }
+  60% { opacity: .85; transform: rotate(-8deg) scale(.96); }
+  100% { opacity: 0; transform: rotate(-8deg) scale(1.02); }
+}
+
+/* ----- UNO! lightning bolt accents flanking the word ----- */
+.uno-fx-bolt { position: absolute; top: 50%; width: 42px; height: 96px; transform: translateY(-50%); animation: bolt-flicker 1.3s ease-in-out .15s both; filter: drop-shadow(0 0 10px #8ef0ff); }
+.uno-fx-bolt svg { width: 100%; height: 100%; fill: #8ef0ff; stroke: #0b3a66; stroke-width: 3; stroke-linejoin: round; }
+.bolt-l { left: -108px; } .bolt-r { right: -108px; transform: translateY(-50%) scaleX(-1); }
+@keyframes bolt-flicker { 0%, 100% { opacity: 0; } 8%, 22% { opacity: 1; } 15% { opacity: .3; } 30% { opacity: 0; } 55% { opacity: 1; } 78% { opacity: .85; } }
+
+/* ----- VS splash: shown once before the first round of a match ----- */
+.vs-splash { position: fixed; inset: 0; z-index: 180; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #1a0106; animation: vs-fade 1.85s ease-in both; }
+.vs-rays { position: absolute; inset: -20%; background: repeating-conic-gradient(from 10deg, #ff5a3a22 0 6deg, #0000 6deg 16deg); animation: u-spin 10s linear infinite; }
+.vs-side { position: relative; z-index: 2; display: flex; align-items: center; gap: 18px; padding: 0 40px; animation: vs-slide-in .5s cubic-bezier(.2, .8, .2, 1) both; }
+.vs-left { flex-direction: row; justify-content: flex-end; width: 42vw; animation-name: vs-slide-left; }
+.vs-right { flex-direction: row-reverse; justify-content: flex-end; width: 42vw; animation-name: vs-slide-right; }
+.vs-avatar-wrap { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.vs-avatar-wrap .seat-avatar { width: clamp(70px, 9vw, 120px); height: clamp(70px, 9vw, 120px); font-size: clamp(32px, 5vw, 56px); display: grid; place-items: center; }
+.vs-avatar-wrap b { color: #fff; font: 800 clamp(14px, 1.6vw, 20px)/1.2 var(--font-ui); text-shadow: 0 2px 4px #000a; max-width: 140px; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vs-word {
+  position: relative; z-index: 3; font: 800 italic clamp(60px, 9vw, 120px)/1 var(--font-ui); color: #fff; -webkit-text-stroke: 6px #8a0d10; paint-order: stroke fill;
+  text-shadow: 0 0 40px #ff5a3a; animation: vs-pop .55s cubic-bezier(.2, 1.6, .3, 1) .25s both;
+}
+@keyframes vs-fade { 0%, 88% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes vs-slide-left { from { opacity: 0; transform: translateX(-120px); } to { opacity: 1; transform: none; } }
+@keyframes vs-slide-right { from { opacity: 0; transform: translateX(120px); } to { opacity: 1; transform: none; } }
+@keyframes vs-pop { from { opacity: 0; transform: scale(2.2) rotate(-12deg); } to { opacity: 1; transform: none; } }
+
+/* ----- Scoreboard (match end) ----- */
+.win-overlay { position: fixed; inset: 0; z-index: 170; display: grid; place-items: center; background: #0a0f2ad8; backdrop-filter: blur(3px); }
+.win-overlay.is-hidden { display: none; }
+.scoreboard { position: relative; width: min(94vw, 880px); padding: 28px 24px 30px; border-radius: 26px; overflow: hidden; text-align: center; background: linear-gradient(180deg, #171c4a, #0a0e2e); box-shadow: 0 0 0 4px #ffd34e55, 0 30px 70px #000b; }
+.sb-rays { position: absolute; inset: 0; z-index: 0; background: radial-gradient(ellipse 70% 60% at 50% 20%, #ffd34e33, transparent 70%); }
+.sb-logo { position: relative; z-index: 1; display: block; width: min(60vw, 220px); margin: 0 auto 6px; aspect-ratio: 400 / 250; height: auto; filter: drop-shadow(0 8px 10px #0008); }
+.sb-title { position: relative; z-index: 1; margin: 0 0 18px; color: #ffd34e; font: 800 italic clamp(26px, 5vw, 40px)/1 var(--font-ui); letter-spacing: .04em; text-shadow: 0 3px 0 #0005; }
+.sb-row { position: relative; z-index: 1; display: flex; flex-wrap: wrap; justify-content: center; gap: 14px; margin-bottom: 22px; }
+.sb-card {
+  --pa: #2aa9d9; --pb: #1b6c9f; position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px; width: 140px; padding: 16px 10px 12px; border-radius: 16px;
+  background: linear-gradient(180deg, #ffffff14, #ffffff05); box-shadow: inset 0 0 0 2px #ffffff22; transition: transform .2s;
+}
+.sb-card.acc-1 { --pa: #e9b52c; --pb: #b87a0c; } .sb-card.acc-2 { --pa: #36c08c; --pb: #1b7f5e; } .sb-card.acc-3 { --pa: #d9559f; --pb: #8e2c67; } .sb-card.acc-4 { --pa: #8f6cf0; --pb: #5236ae; }
+.sb-card.is-leader { box-shadow: inset 0 0 0 2px #ffd34e, 0 0 24px 2px #ffd34e55; transform: translateY(-4px); }
+.sb-card .sb-avatar { width: 64px; height: 64px; border-radius: 10px; }
+.sb-crown { position: absolute; top: -14px; right: 10px; font-size: 26px; color: #ffd34e; text-shadow: 0 2px 2px #0006; transform: rotate(14deg); animation: uno-pop .4s cubic-bezier(.2, 1.6, .4, 1) both; }
+.sb-name { max-width: 120px; overflow: hidden; color: #fff; font: 700 14px/1.2 var(--font-ui); text-overflow: ellipsis; white-space: nowrap; }
+.sb-score { color: #ffd34e; font: 800 28px/1 var(--font-ui); }
+.sb-gain { color: #8ef09a; font: 700 13px/1 var(--font-ui); }
+.sb-actions { position: relative; z-index: 1; display: flex; align-items: center; justify-content: center; gap: 14px; }
+.sb-btn { width: min(76vw, 320px); white-space: nowrap; } .sb-btn > span { font-size: clamp(22px, 3.2vw, 32px); }
+.sb-wait { margin: 0; color: #ffffffb0; font: 700 14px/1.3 var(--font-ui); }
+.sb-leave { position: absolute; left: 0; top: -58px; }
